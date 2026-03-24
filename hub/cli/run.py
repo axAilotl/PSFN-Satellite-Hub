@@ -10,22 +10,20 @@ from hub.adapters.agent.hermes_streaming import HermesStreamingProvider
 from hub.adapters.stt.deepgram_live import DeepgramLiveSTTProvider
 from hub.adapters.tts.elevenlabs_streaming import ElevenLabsStreamingTTS
 from hub.devices.esphome_session import ESPHomeSession
+from hub.devices.realtime_server import RealtimeVoiceServer
 from hub.devices.voice_runtime_streaming import StreamingVoiceAssistantRuntime
 from hub.media.http_audio import StaticAudioServer
 from hub.runtime import load_runtime_config
 from hub.storage.session_cache import SessionCache
 
 
-async def _run_runtime(project_root: Path) -> None:
-    config = load_runtime_config(project_root)
-    audio_server = StaticAudioServer(
-        host=config.audio_bind_host,
-        port=config.audio_port,
-        root=config.audio_root,
-        public_host=config.audio_public_host,
-    )
-    audio_server.start()
-
+async def _run_esphome_runtime(
+    *,
+    config,
+    audio_server: StaticAudioServer,
+    session_cache: SessionCache,
+) -> None:
+    assert config.esphome_target is not None
     stt = DeepgramLiveSTTProvider(api_key=config.deepgram_api_key)
     tts = ElevenLabsStreamingTTS(
         api_key=config.elevenlabs_api_key,
@@ -36,7 +34,6 @@ async def _run_runtime(project_root: Path) -> None:
         gateway_home=config.hermes_gateway_home,
         model_name=config.hermes_model,
     )
-    session_cache = SessionCache(ttl=timedelta(seconds=config.session_ttl_seconds))
 
     try:
         async with ESPHomeSession(config.esphome_target) as session:
@@ -52,10 +49,12 @@ async def _run_runtime(project_root: Path) -> None:
                 continue_conversation=config.continue_conversation,
                 announcement_timeout_seconds=config.announcement_timeout_seconds,
                 reply_timeout_seconds=config.reply_timeout_seconds,
+                initial_silence_timeout_seconds=config.voice_initial_silence_timeout_seconds,
                 endpointing_grace_seconds=config.voice_endpointing_grace_seconds,
                 silence_timeout_seconds=config.voice_silence_timeout_seconds,
                 max_turn_seconds=config.voice_max_turn_seconds,
                 speech_rms_threshold=config.voice_speech_rms_threshold,
+                min_speech_chunks_for_endpointing=config.voice_min_speech_chunks_for_endpointing,
             )
             unsubscribe = session.subscribe_voice_assistant(
                 handle_start=runtime.handle_start,
@@ -67,10 +66,6 @@ async def _run_runtime(project_root: Path) -> None:
                     f"Connected to {device_info.friendly_name or device_info.name} at "
                     f"{config.esphome_target.host}:{config.esphome_target.port}"
                 )
-                typer.echo(f"Hermes backend: {config.hermes_agent_backend}")
-                typer.echo(f"Hermes model: {config.hermes_model}")
-                typer.echo(f"Audio server: http://{config.audio_public_host}:{config.audio_port}/")
-                typer.echo("Voice bridge is running. Press Ctrl-C to stop.")
                 while True:
                     await asyncio.sleep(3600)
             finally:
@@ -80,6 +75,71 @@ async def _run_runtime(project_root: Path) -> None:
         await agent.aclose()
         await stt.aclose()
         await tts.aclose()
+
+
+async def _run_realtime_runtime(
+    *,
+    config,
+    audio_server: StaticAudioServer,
+    session_cache: SessionCache,
+) -> None:
+    async with RealtimeVoiceServer(
+        host=config.realtime_target.bind_host,
+        port=config.realtime_target.port,
+        artifacts_root=config.artifacts_root,
+        audio_server=audio_server,
+        session_cache=session_cache,
+        deepgram_api_key=config.deepgram_api_key,
+        elevenlabs_api_key=config.elevenlabs_api_key,
+        elevenlabs_voice_id=config.elevenlabs_voice_id,
+        elevenlabs_model_id=config.elevenlabs_model_id,
+        hermes_gateway_home=config.hermes_gateway_home,
+        hermes_model=config.hermes_model,
+    ):
+        while True:
+            await asyncio.sleep(3600)
+
+
+async def _run_runtime(project_root: Path) -> None:
+    config = load_runtime_config(project_root)
+    audio_server = StaticAudioServer(
+        host=config.audio_bind_host,
+        port=config.audio_port,
+        root=config.audio_root,
+        public_host=config.audio_public_host,
+    )
+    audio_server.start()
+    session_cache = SessionCache(ttl=timedelta(seconds=config.session_ttl_seconds))
+
+    typer.echo(f"Device transport: {config.device_transport}")
+    typer.echo(f"Hermes backend: {config.hermes_agent_backend}")
+    typer.echo(f"Hermes model: {config.hermes_model}")
+    typer.echo(f"Audio server: http://{config.audio_public_host}:{config.audio_port}/")
+    if config.device_transport in {"realtime", "hybrid"}:
+        realtime_host = config.realtime_target.public_host or config.realtime_target.bind_host
+        typer.echo(f"Realtime voice server: ws://{realtime_host}:{config.realtime_target.port}/")
+    typer.echo("Voice bridge is running. Press Ctrl-C to stop.")
+
+    try:
+        async with asyncio.TaskGroup() as task_group:
+            if config.device_transport in {"esphome", "hybrid"}:
+                task_group.create_task(
+                    _run_esphome_runtime(
+                        config=config,
+                        audio_server=audio_server,
+                        session_cache=session_cache,
+                    )
+                )
+            if config.device_transport in {"realtime", "hybrid"}:
+                task_group.create_task(
+                    _run_realtime_runtime(
+                        config=config,
+                        audio_server=audio_server,
+                        session_cache=session_cache,
+                    )
+                )
+    finally:
+        audio_server.stop()
 
 
 def run() -> None:

@@ -12,3 +12,10 @@ class ESPHomeTarget:
     expected_name: str | None = None
     client_info: str = "opanhome-hub"
     timezone: str = "America/New_York"
+
+
+@dataclass(slots=True)
+class RealtimeTarget:
+    bind_host: str = "0.0.0.0"
+    port: int = 8787
+    public_host: str | None = None

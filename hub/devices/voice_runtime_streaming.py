@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import array
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
 from io import BytesIO
@@ -41,6 +42,7 @@ class ActiveTurn:
     events_path: Path
     chunks: int = 0
     bytes_received: int = 0
+    speech_chunks: int = 0
     last_speech_at: datetime | None = None
 
 
@@ -58,10 +60,12 @@ class StreamingVoiceAssistantRuntime:
         continue_conversation: bool,
         announcement_timeout_seconds: float,
         reply_timeout_seconds: float,
+        initial_silence_timeout_seconds: float,
         endpointing_grace_seconds: float,
         silence_timeout_seconds: float,
         max_turn_seconds: float,
         speech_rms_threshold: float,
+        min_speech_chunks_for_endpointing: int,
     ) -> None:
         self._session = session
         self._stt = stt
@@ -73,13 +77,16 @@ class StreamingVoiceAssistantRuntime:
         self._continue_conversation = continue_conversation
         self._announcement_timeout_seconds = announcement_timeout_seconds
         self._reply_timeout_seconds = reply_timeout_seconds
+        self._initial_silence_timeout_seconds = initial_silence_timeout_seconds
         self._endpointing_grace_seconds = endpointing_grace_seconds
         self._silence_timeout_seconds = silence_timeout_seconds
         self._max_turn_seconds = max_turn_seconds
         self._speech_rms_threshold = speech_rms_threshold
+        self._min_speech_chunks_for_endpointing = min_speech_chunks_for_endpointing
         self._active: ActiveTurn | None = None
         self._last_session_id: str | None = None
         self._watchdog_task: asyncio.Task[None] | None = None
+        self._response_task: asyncio.Task[None] | None = None
         self._discard_audio_until_stop = False
         self._finalize_lock = asyncio.Lock()
 
@@ -92,7 +99,9 @@ class StreamingVoiceAssistantRuntime:
     ) -> int | None:
         if self._active is not None:
             _LOGGER.warning("Replacing active turn %s", self._active.session_id)
+            await self._finish_turn(abort=True, stop_reason="superseded")
         self._cancel_watchdog()
+        await self._cancel_response_task(reason="new_start")
 
         session_id = self._resolve_session_id(conversation_id)
         started_at = utc_now()
@@ -157,6 +166,7 @@ class StreamingVoiceAssistantRuntime:
         if rms >= self._speech_rms_threshold:
             first_speech = self._active.last_speech_at is None
             self._active.last_speech_at = utc_now()
+            self._active.speech_chunks += 1
             if first_speech:
                 self._append_event(
                     self._active,
@@ -188,6 +198,14 @@ class StreamingVoiceAssistantRuntime:
                     await self._finish_turn(abort=False, stop_reason="max_turn_timeout")
                     return
                 if active.last_speech_at is None:
+                    if elapsed_seconds >= self._initial_silence_timeout_seconds:
+                        await self._finish_turn(abort=False, stop_reason="initial_silence_timeout")
+                        return
+                    continue
+                if active.speech_chunks < self._min_speech_chunks_for_endpointing:
+                    if elapsed_seconds >= self._initial_silence_timeout_seconds:
+                        await self._finish_turn(abort=False, stop_reason="insufficient_speech_timeout")
+                        return
                     continue
                 if elapsed_seconds < self._endpointing_grace_seconds:
                     continue
@@ -202,7 +220,31 @@ class StreamingVoiceAssistantRuntime:
             self._watchdog_task.cancel()
             self._watchdog_task = None
 
+    async def _cancel_response_task(self, *, reason: str) -> None:
+        task = self._response_task
+        if task is None:
+            return
+        if task.done():
+            self._response_task = None
+            return
+        if task is asyncio.current_task():
+            return
+        _LOGGER.info("Interrupting active response pipeline: %s", reason)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            _LOGGER.exception("Response pipeline failed while interrupting active output")
+        finally:
+            with suppress(Exception):
+                await self._stt.abort_turn()
+            if self._response_task is task:
+                self._response_task = None
+
     async def _finish_turn(self, *, abort: bool, stop_reason: str) -> None:
+        response_task = asyncio.current_task() if not abort else None
         async with self._finalize_lock:
             active = self._active
             if active is None:
@@ -213,6 +255,8 @@ class StreamingVoiceAssistantRuntime:
                 self._watchdog_task.cancel()
             self._watchdog_task = None
             self._discard_audio_until_stop = stop_reason != "device_stop"
+            if response_task is not None:
+                self._response_task = response_task
 
         self._append_event(
             active,
@@ -222,6 +266,7 @@ class StreamingVoiceAssistantRuntime:
                 "reason": stop_reason,
                 "chunks": active.chunks,
                 "bytes_received": active.bytes_received,
+                "speech_chunks": active.speech_chunks,
                 "speech_detected": active.last_speech_at is not None,
             },
         )
@@ -231,6 +276,8 @@ class StreamingVoiceAssistantRuntime:
         )
 
         if abort:
+            with suppress(Exception):
+                await self._stt.abort_turn()
             write_json(
                 active.reply_path,
                 {
@@ -238,6 +285,10 @@ class StreamingVoiceAssistantRuntime:
                     "status": "aborted",
                     "reason": stop_reason,
                 },
+            )
+            self._session.client.send_voice_assistant_event(
+                VoiceAssistantEventType.VOICE_ASSISTANT_RUN_END,
+                None,
             )
             return
 
@@ -259,20 +310,22 @@ class StreamingVoiceAssistantRuntime:
                     VoiceAssistantEventType.VOICE_ASSISTANT_INTENT_END,
                     {"continue_conversation": "1" if self._continue_conversation else "0"},
                 )
-                response_text = await asyncio.wait_for(
-                    self._stream_agent_reply(active.session_id, transcript.text),
-                    timeout=self._reply_timeout_seconds,
-                )
+                response_text = await self._stream_agent_reply(active.session_id, transcript.text)
             else:
-                response_text = "I didn't catch that."
                 self._session.client.send_voice_assistant_event(
                     VoiceAssistantEventType.VOICE_ASSISTANT_INTENT_END,
-                    {"continue_conversation": "1" if self._continue_conversation else "0"},
+                    {"continue_conversation": "0"},
                 )
-                await asyncio.wait_for(
-                    self._stream_speech(response_text),
-                    timeout=self._reply_timeout_seconds,
+                write_json(
+                    active.reply_path,
+                    {
+                        "session_id": active.session_id,
+                        "transcript": "",
+                        "status": "no_input",
+                        "reason": stop_reason,
+                    },
                 )
+                return
             write_json(
                 active.reply_path,
                 {
@@ -282,6 +335,19 @@ class StreamingVoiceAssistantRuntime:
                     "reason": stop_reason,
                 },
             )
+        except asyncio.CancelledError:
+            _LOGGER.info("Voice turn interrupted: %s", active.session_id)
+            with suppress(Exception):
+                await self._stt.abort_turn()
+            write_json(
+                active.reply_path,
+                {
+                    "session_id": active.session_id,
+                    "status": "interrupted",
+                    "reason": stop_reason,
+                },
+            )
+            raise
         except TimeoutError as exc:
             _LOGGER.warning("Voice turn reply timed out: %s", active.session_id)
             write_json(
@@ -309,13 +375,6 @@ class StreamingVoiceAssistantRuntime:
                     "message": f"Reply timed out after {self._reply_timeout_seconds:.1f}s",
                 },
             )
-            try:
-                await asyncio.wait_for(
-                    self._stream_speech("Sorry, something went wrong."),
-                    timeout=self._reply_timeout_seconds,
-                )
-            except Exception:
-                _LOGGER.exception("Failed to speak timeout fallback message")
         except Exception as exc:
             _LOGGER.exception("Voice turn failed: %s", active.session_id)
             write_json(
@@ -331,18 +390,19 @@ class StreamingVoiceAssistantRuntime:
                 VoiceAssistantEventType.VOICE_ASSISTANT_ERROR,
                 {"code": "bridge_error", "message": str(exc)},
             )
-            try:
-                await asyncio.wait_for(
-                    self._stream_speech("Sorry, something went wrong."),
-                    timeout=self._reply_timeout_seconds,
-                )
-            except Exception:
-                _LOGGER.exception("Failed to speak fallback error message")
+        finally:
+            if self._response_task is response_task:
+                self._response_task = None
+            self._session.client.send_voice_assistant_event(
+                VoiceAssistantEventType.VOICE_ASSISTANT_RUN_END,
+                None,
+            )
 
     async def _stream_agent_reply(self, session_id: str, transcript: str) -> str:
         response_text = ""
         text_chunks: asyncio.Queue[str | None] = asyncio.Queue()
         stream = self._audio_server.open_stream(content_type="audio/mpeg")
+        reply_stream = self._agent.stream_reply(text=transcript, conversation_id=session_id)
         self._session.client.send_voice_assistant_event(
             VoiceAssistantEventType.VOICE_ASSISTANT_TTS_STREAM_START,
             None,
@@ -351,12 +411,24 @@ class StreamingVoiceAssistantRuntime:
             self._session.client.send_voice_assistant_announcement_await_response(
                 media_id=stream.url,
                 timeout=self._announcement_timeout_seconds,
-                start_conversation=self._continue_conversation,
+                start_conversation=False,
             )
         )
         tts_task = asyncio.create_task(self._pipe_tts(text_chunks, stream))
         try:
-            async for delta in self._agent.stream_reply(text=transcript, conversation_id=session_id):
+            while True:
+                try:
+                    delta = await asyncio.wait_for(anext(reply_stream), timeout=self._reply_timeout_seconds)
+                except StopAsyncIteration:
+                    break
+                except TimeoutError:
+                    if response_text.strip():
+                        _LOGGER.warning(
+                            "Agent stream stalled after partial reply; finishing partial response: %s",
+                            session_id,
+                        )
+                        break
+                    raise
                 response_text += delta
                 await text_chunks.put(delta)
             await text_chunks.put(None)
@@ -364,6 +436,8 @@ class StreamingVoiceAssistantRuntime:
             stream.close()
             await announcement_task
         finally:
+            with suppress(Exception):
+                await reply_stream.aclose()
             stream.close()
             if not announcement_task.done():
                 announcement_task.cancel()
@@ -386,7 +460,7 @@ class StreamingVoiceAssistantRuntime:
             self._session.client.send_voice_assistant_announcement_await_response(
                 media_id=stream.url,
                 timeout=self._announcement_timeout_seconds,
-                start_conversation=self._continue_conversation,
+                start_conversation=False,
             )
         )
         tts_task = asyncio.create_task(self._pipe_tts(text_chunks, stream))

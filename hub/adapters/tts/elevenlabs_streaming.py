@@ -61,6 +61,7 @@ class ElevenLabsStreamingTTS:
         async def _sender() -> None:
             try:
                 pending = ""
+                has_started = False
                 while True:
                     item = await text_chunks.get()
                     if item is None:
@@ -68,21 +69,25 @@ class ElevenLabsStreamingTTS:
                     if not item:
                         continue
                     pending += item
-                    await self._send_json(
-                        {
-                            "context_id": ctx_id,
-                            "text": item,
-                            "flush": _should_flush(pending),
-                        }
-                    )
-                    if _should_flush(pending):
-                        pending = ""
+                    while True:
+                        flush_text, pending = _take_flush_chunk(pending, has_started=has_started)
+                        if not flush_text:
+                            break
+                        await self._send_json(
+                            {
+                                "context_id": ctx_id,
+                                "text": flush_text,
+                                "flush": True,
+                            }
+                        )
+                        has_started = True
 
-                if pending.strip():
+                final_text = pending.strip()
+                if final_text:
                     await self._send_json(
                         {
                             "context_id": ctx_id,
-                            "text": " ",
+                            "text": final_text,
                             "flush": True,
                         }
                     )
@@ -200,12 +205,80 @@ def _is_open(connection: websockets.ClientConnection | None) -> bool:
     return connection is not None and getattr(connection, "state", None) == State.OPEN
 
 
-def _should_flush(chunk: str, *, soft_limit: int = 80) -> bool:
+def _take_flush_chunk(
+    chunk: str,
+    *,
+    has_started: bool,
+    first_words: int = 3,
+    first_chars: int = 24,
+    soft_limit: int = 80,
+    hard_limit: int = 140,
+) -> tuple[str | None, str]:
     if not chunk:
-        return False
-    stripped = chunk.rstrip()
+        return None, chunk
+
+    boundary = _sentence_boundary(chunk)
+    trailing_boundary = _trailing_whitespace_boundary(chunk)
+    if boundary is None and trailing_boundary is not None and not has_started and _should_start_playback(
+        chunk,
+        first_words=first_words,
+        first_chars=first_chars,
+    ):
+        boundary = trailing_boundary
+    if boundary is None and trailing_boundary is not None and len(chunk.strip()) >= soft_limit:
+        boundary = trailing_boundary
+    if boundary is None and len(chunk.strip()) >= hard_limit:
+        boundary = len(chunk)
+    if boundary is None:
+        return None, chunk
+
+    flush_text = chunk[:boundary].strip()
+    remainder = chunk[boundary:].lstrip()
+    if not flush_text:
+        return None, remainder
+    return flush_text, remainder
+
+
+def _should_flush(
+    chunk: str,
+    *,
+    has_started: bool = False,
+    first_words: int = 3,
+    first_chars: int = 24,
+    soft_limit: int = 80,
+    hard_limit: int = 140,
+) -> bool:
+    flush_text, _ = _take_flush_chunk(
+        chunk,
+        has_started=has_started,
+        first_words=first_words,
+        first_chars=first_chars,
+        soft_limit=soft_limit,
+        hard_limit=hard_limit,
+    )
+    return flush_text is not None
+
+
+def _sentence_boundary(chunk: str) -> int | None:
+    for index, char in enumerate(chunk):
+        if char not in ".?!\n":
+            continue
+        next_index = index + 1
+        if next_index >= len(chunk) or chunk[next_index].isspace():
+            return next_index
+    return None
+
+
+def _trailing_whitespace_boundary(chunk: str) -> int | None:
+    if not chunk or not chunk[-1].isspace():
+        return None
+    return len(chunk)
+
+
+def _should_start_playback(chunk: str, *, first_words: int, first_chars: int) -> bool:
+    stripped = chunk.strip()
     if not stripped:
         return False
-    if stripped[-1] in ".?!\n":
+    if len(stripped) >= first_chars:
         return True
-    return len(stripped) >= soft_limit and chunk[-1].isspace()
+    return len(stripped.split()) >= first_words

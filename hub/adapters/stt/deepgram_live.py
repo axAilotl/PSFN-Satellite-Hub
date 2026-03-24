@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 import json
+import logging
 from time import perf_counter
 from typing import Any
 
@@ -11,6 +12,8 @@ from websockets.exceptions import ConnectionClosed
 from websockets.protocol import State
 
 from hub.adapters.interfaces import TranscriptResult
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -43,11 +46,13 @@ class DeepgramLiveSTTProvider:
         self._keepalive_task: asyncio.Task[None] | None = None
         self._active_turn: _TurnState | None = None
         self._send_lock = asyncio.Lock()
+        self._connect_lock = asyncio.Lock()
         self._last_send_at = perf_counter()
 
     async def start_turn(self, conversation_id: str) -> None:
         if self._active_turn is not None:
-            raise RuntimeError("Deepgram turn already active")
+            _LOGGER.warning("Resetting lingering Deepgram turn before starting %s", conversation_id)
+            await self.abort_turn()
         await self._ensure_connected()
         self._active_turn = _TurnState(conversation_id=conversation_id)
 
@@ -80,47 +85,50 @@ class DeepgramLiveSTTProvider:
             is_final=True,
         )
 
+    async def abort_turn(self) -> None:
+        if self._active_turn is None and not _is_open(self._ws):
+            return
+        self._active_turn = None
+        await self._disconnect()
+
     async def aclose(self) -> None:
-        if self._keepalive_task is not None:
-            self._keepalive_task.cancel()
-            self._keepalive_task = None
-        if self._reader_task is not None:
-            self._reader_task.cancel()
-            self._reader_task = None
-        if self._ws is not None:
-            await self._ws.close()
-            self._ws = None
+        await self._disconnect()
         self._active_turn = None
 
     async def _ensure_connected(self) -> None:
         if _is_open(self._ws):
             return
-        url = (
-            "wss://api.deepgram.com/v1/listen"
-            f"?model={self._model}"
-            "&encoding=linear16"
-            f"&sample_rate={self._sample_rate}"
-            "&channels=1"
-            "&interim_results=true"
-            f"&endpointing={self._endpointing_ms}"
-            f"&utterance_end_ms={self._utterance_end_ms}"
-            "&vad_events=true"
-            "&smart_format=true"
-        )
-        self._ws = await websockets.connect(
-            url,
-            additional_headers={"Authorization": f"Token {self._api_key}"},
-            ping_interval=20,
-            ping_timeout=20,
-            max_size=None,
-        )
-        self._reader_task = asyncio.create_task(self._reader_loop())
-        self._keepalive_task = asyncio.create_task(self._keepalive_loop())
+        async with self._connect_lock:
+            if _is_open(self._ws):
+                return
+            url = (
+                "wss://api.deepgram.com/v1/listen"
+                f"?model={self._model}"
+                "&encoding=linear16"
+                f"&sample_rate={self._sample_rate}"
+                "&channels=1"
+                "&interim_results=true"
+                f"&endpointing={self._endpointing_ms}"
+                f"&utterance_end_ms={self._utterance_end_ms}"
+                "&vad_events=true"
+                "&smart_format=true"
+            )
+            self._ws = await websockets.connect(
+                url,
+                additional_headers={"Authorization": f"Token {self._api_key}"},
+                ping_interval=20,
+                ping_timeout=20,
+                max_size=None,
+            )
+            self._reader_task = asyncio.create_task(self._reader_loop())
+            self._keepalive_task = asyncio.create_task(self._keepalive_loop())
 
     async def _reader_loop(self) -> None:
+        ws = self._ws
         try:
-            assert self._ws is not None
-            async for raw_message in self._ws:
+            if ws is None:
+                return
+            async for raw_message in ws:
                 if isinstance(raw_message, bytes):
                     continue
                 self._handle_message(json.loads(raw_message))
@@ -129,7 +137,10 @@ class DeepgramLiveSTTProvider:
         except ConnectionClosed:
             return
         finally:
-            self._ws = None
+            if self._ws is ws:
+                self._ws = None
+            if self._reader_task is asyncio.current_task():
+                self._reader_task = None
 
     def _handle_message(self, payload: dict[str, Any]) -> None:
         turn = self._active_turn
@@ -191,6 +202,22 @@ class DeepgramLiveSTTProvider:
                     return
         except asyncio.CancelledError:
             return
+        finally:
+            if self._keepalive_task is asyncio.current_task():
+                self._keepalive_task = None
+
+    async def _disconnect(self) -> None:
+        if self._keepalive_task is not None:
+            self._keepalive_task.cancel()
+            self._keepalive_task = None
+        if self._reader_task is not None:
+            self._reader_task.cancel()
+            self._reader_task = None
+        if self._ws is not None:
+            try:
+                await self._ws.close()
+            finally:
+                self._ws = None
 
 
 def _is_open(connection: websockets.ClientConnection | None) -> bool:

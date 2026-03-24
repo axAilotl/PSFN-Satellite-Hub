@@ -1,0 +1,23 @@
+[Unit]
+Description=Opanhome Realtime Voice Client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=opanhome
+Group=opanhome
+WorkingDirectory=/home/opanhome/opanhome-realtime-client
+Environment=PATH=/home/opanhome/linux-voice-assistant/.venv/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+Environment=PULSE_SERVER=/run/user/1000/pulse/native
+Environment=PULSE_COOKIE=DISABLED
+EnvironmentFile=-/etc/opanhome-realtime-client.env
+ExecStart=/home/opanhome/linux-voice-assistant/.venv/bin/python /home/opanhome/opanhome-realtime-client/client.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -7,7 +7,7 @@ import socket
 
 from dotenv import dotenv_values, load_dotenv
 
-from hub.config import ESPHomeTarget
+from hub.config import ESPHomeTarget, RealtimeTarget
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -45,7 +45,9 @@ def detect_outbound_host(remote_host: str, remote_port: int) -> str:
 @dataclass(slots=True)
 class HubRuntimeConfig:
     project_root: Path
-    esphome_target: ESPHomeTarget
+    device_transport: str
+    esphome_target: ESPHomeTarget | None
+    realtime_target: RealtimeTarget
     deepgram_api_key: str
     elevenlabs_api_key: str
     elevenlabs_voice_id: str | None
@@ -62,10 +64,12 @@ class HubRuntimeConfig:
     session_ttl_seconds: int
     announcement_timeout_seconds: float
     reply_timeout_seconds: float
+    voice_initial_silence_timeout_seconds: float
     voice_endpointing_grace_seconds: float
     voice_silence_timeout_seconds: float
     voice_max_turn_seconds: float
     voice_speech_rms_threshold: float
+    voice_min_speech_chunks_for_endpointing: int
 
     @property
     def audio_root(self) -> Path:
@@ -95,15 +99,34 @@ def load_runtime_config(project_root: Path) -> HubRuntimeConfig:
 
     _load_optional_env(project_env, override=True)
 
-    host = _required("ESPHOME_HOST")
-    port = int(os.getenv("ESPHOME_PORT", "6053"))
-    noise_psk = os.getenv("ESPHOME_NOISE_PSK") or None
-    password = os.getenv("ESPHOME_PASSWORD") or None
-    expected_name = os.getenv("ESPHOME_EXPECTED_NAME") or None
+    device_transport = os.getenv("DEVICE_TRANSPORT", "esphome").strip().lower()
+    if device_transport not in {"esphome", "realtime", "hybrid"}:
+        raise ValueError(f"Unsupported DEVICE_TRANSPORT: {device_transport}")
+
+    esphome_target: ESPHomeTarget | None = None
+    if device_transport in {"esphome", "hybrid"}:
+        host = _required("ESPHOME_HOST")
+        port = int(os.getenv("ESPHOME_PORT", "6053"))
+        noise_psk = os.getenv("ESPHOME_NOISE_PSK") or None
+        password = os.getenv("ESPHOME_PASSWORD") or None
+        expected_name = os.getenv("ESPHOME_EXPECTED_NAME") or None
+        esphome_target = ESPHomeTarget(
+            host=host,
+            port=port,
+            password=password,
+            noise_psk=noise_psk,
+            expected_name=expected_name,
+        )
+    else:
+        host = os.getenv("ESPHOME_HOST", "8.8.8.8")
+        port = int(os.getenv("ESPHOME_PORT", "53"))
 
     audio_bind_host = os.getenv("AUDIO_SERVER_BIND_HOST", "0.0.0.0")
     audio_public_host = os.getenv("AUDIO_PUBLIC_HOST") or detect_outbound_host(host, port)
     audio_port = int(os.getenv("AUDIO_SERVER_PORT", "8099"))
+    realtime_bind_host = os.getenv("REALTIME_VOICE_BIND_HOST", "0.0.0.0")
+    realtime_port = int(os.getenv("REALTIME_VOICE_PORT", "8787"))
+    realtime_public_host = os.getenv("REALTIME_VOICE_PUBLIC_HOST") or audio_public_host
 
     hermes_agent_backend = os.getenv("HERMES_AGENT_BACKEND", "subprocess").strip().lower()
     hermes_home = _resolve_path(project_root, os.getenv("HERMES_HOME", str(Path.home() / ".hermes")))
@@ -116,12 +139,12 @@ def load_runtime_config(project_root: Path) -> HubRuntimeConfig:
 
     return HubRuntimeConfig(
         project_root=project_root,
-        esphome_target=ESPHomeTarget(
-            host=host,
-            port=port,
-            password=password,
-            noise_psk=noise_psk,
-            expected_name=expected_name,
+        device_transport=device_transport,
+        esphome_target=esphome_target,
+        realtime_target=RealtimeTarget(
+            bind_host=realtime_bind_host,
+            port=realtime_port,
+            public_host=realtime_public_host,
         ),
         deepgram_api_key=_required("DEEPGRAM_API_KEY"),
         elevenlabs_api_key=_required("ELEVENLABS_API_KEY"),
@@ -135,12 +158,14 @@ def load_runtime_config(project_root: Path) -> HubRuntimeConfig:
         audio_public_host=audio_public_host,
         audio_port=audio_port,
         artifacts_root=artifacts_root,
-        continue_conversation=_env_bool("CONTINUE_CONVERSATION", False),
+        continue_conversation=_env_bool("CONTINUE_CONVERSATION", True),
         session_ttl_seconds=int(os.getenv("SESSION_TTL_SECONDS", "300")),
         announcement_timeout_seconds=float(os.getenv("ANNOUNCEMENT_TIMEOUT_SECONDS", "120")),
         reply_timeout_seconds=float(os.getenv("VOICE_REPLY_TIMEOUT_SECONDS", "30")),
+        voice_initial_silence_timeout_seconds=float(os.getenv("VOICE_INITIAL_SILENCE_TIMEOUT_SECONDS", "4.0")),
         voice_endpointing_grace_seconds=float(os.getenv("VOICE_ENDPOINTING_GRACE_SECONDS", "2.0")),
         voice_silence_timeout_seconds=float(os.getenv("VOICE_SILENCE_TIMEOUT_SECONDS", "1.2")),
         voice_max_turn_seconds=float(os.getenv("VOICE_MAX_TURN_SECONDS", "20")),
         voice_speech_rms_threshold=float(os.getenv("VOICE_SPEECH_RMS_THRESHOLD", "25")),
+        voice_min_speech_chunks_for_endpointing=int(os.getenv("VOICE_MIN_SPEECH_CHUNKS_FOR_ENDPOINTING", "4")),
     )
