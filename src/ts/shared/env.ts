@@ -3,7 +3,6 @@ import os from "node:os";
 import path from "node:path";
 
 import dotenv from "dotenv";
-import YAML from "yaml";
 
 export interface HermesRuntimeConfig {
   hermesHome: string;
@@ -11,6 +10,12 @@ export interface HermesRuntimeConfig {
   baseUrl: string;
   apiKey: string;
   provider: string;
+}
+
+export interface PsfnRuntimeConfig {
+  model: string;
+  baseUrl: string;
+  apiKey?: string;
 }
 
 export interface HubConfig {
@@ -21,7 +26,7 @@ export interface HubConfig {
   elevenlabsVoiceId?: string;
   elevenlabsModelId: string;
   artifactsRoot: string;
-  hermes: HermesRuntimeConfig;
+  psfn: PsfnRuntimeConfig;
   sessionTtlSeconds: number;
 }
 
@@ -29,6 +34,7 @@ export interface PiClientConfig {
   hubUrl: string;
   deviceId: string;
   deviceName: string;
+  conversationId?: string;
   inputCommand: string[];
   outputCommand: string[];
   sampleRate: number;
@@ -62,46 +68,20 @@ export function loadProjectEnv(projectRoot: string): void {
   }
 }
 
-export function loadHermesRuntime(projectRoot: string): HermesRuntimeConfig {
-  const hermesHome = resolvePath(projectRoot, process.env.HERMES_HOME || path.join(os.homedir(), ".hermes"));
-  const hermesEnvPath = path.join(hermesHome, ".env");
-  if (fs.existsSync(hermesEnvPath)) {
-    dotenv.config({ path: hermesEnvPath, override: false });
-  }
-
-  const configPath = path.join(hermesHome, "config.yaml");
-  let provider = "openrouter";
-  let baseUrl = "https://openrouter.ai/api/v1";
-  let model = process.env.HERMES_MODEL || process.env.LLM_MODEL || "moonshotai/kimi-k2.5";
-
-  if (fs.existsSync(configPath)) {
-    const parsed = YAML.parse(fs.readFileSync(configPath, "utf8")) as Record<string, unknown>;
-    const modelConfig = (parsed.model ?? {}) as Record<string, unknown>;
-    provider = String(modelConfig.provider || provider);
-    baseUrl = String(modelConfig.base_url || baseUrl);
-    model = String(modelConfig.default || model);
-  }
-
-  const apiKey =
-    process.env.OPENROUTER_API_KEY ||
-    process.env.OPENAI_API_KEY ||
-    "";
-  if (!apiKey) {
-    throw new Error(`Missing API key for Hermes runtime under ${hermesHome}`);
-  }
-
+export function loadPsfnRuntime(_projectRoot: string): PsfnRuntimeConfig {
+  const baseUrl = required("PSFN_API_BASE_URL");
+  const model = process.env.PSFN_MODEL?.trim() || "psfn";
+  const apiKey = process.env.PSFN_API_KEY?.trim() || undefined;
   return {
-    hermesHome,
     model,
     baseUrl,
     apiKey,
-    provider,
   };
 }
 
 export function loadHubConfig(projectRoot: string): HubConfig {
   loadProjectEnv(projectRoot);
-  const hermes = loadHermesRuntime(projectRoot);
+  const psfn = loadPsfnRuntime(projectRoot);
 
   return {
     bindHost: process.env.REALTIME_VOICE_BIND_HOST || "0.0.0.0",
@@ -111,7 +91,7 @@ export function loadHubConfig(projectRoot: string): HubConfig {
     elevenlabsVoiceId: optional("ELEVENLABS_VOICE_ID"),
     elevenlabsModelId: process.env.ELEVENLABS_MODEL_ID || "eleven_flash_v2_5",
     artifactsRoot: resolvePath(projectRoot, process.env.ARTIFACT_ROOT || ".artifacts/runtime-ts"),
-    hermes,
+    psfn,
     sessionTtlSeconds: Number.parseInt(process.env.SESSION_TTL_SECONDS || "300", 10),
   };
 }
@@ -133,6 +113,7 @@ export function loadPiClientConfig(projectRoot: string): PiClientConfig {
     hubUrl: process.env.HUB_WS_URL || "ws://192.168.1.220:8787/",
     deviceId: process.env.DEVICE_ID || os.hostname(),
     deviceName: process.env.DEVICE_NAME || `Opanhome TS Client (${os.hostname()})`,
+    conversationId: optional("CONVERSATION_ID"),
     inputCommand: splitCommand(
       process.env.AUDIO_INPUT_COMMAND ||
         `arecord -q -f S16_LE -r ${sampleRate} -c 1 -D ${inputDevice} -t raw`,

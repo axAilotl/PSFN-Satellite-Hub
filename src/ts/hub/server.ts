@@ -24,7 +24,7 @@ import {
   type TranscriptResult,
 } from "./deepgram-live.js";
 import { ElevenLabsStream } from "./elevenlabs-stream.js";
-import { HermesModelAdapter } from "./hermes-model.js";
+import { PsfnModelAdapter } from "./psfn-model.js";
 import { SessionStore } from "./session-store.js";
 
 export class RealtimeHubServer {
@@ -35,12 +35,12 @@ export class RealtimeHubServer {
 
   private readonly wsServer = new WebSocketServer({ server: this.httpServer });
   private readonly sessions: SessionStore;
-  private readonly agent: HermesModelAdapter;
+  private readonly agent: PsfnModelAdapter;
   private readonly tts: ElevenLabsStream;
 
   constructor(private readonly config: HubConfig) {
     this.sessions = new SessionStore(config.sessionTtlSeconds);
-    this.agent = new HermesModelAdapter(config.hermes);
+    this.agent = new PsfnModelAdapter(config.psfn);
     this.tts = new ElevenLabsStream(
       config.elevenlabsApiKey,
       config.elevenlabsModelId,
@@ -87,7 +87,7 @@ class RealtimeConnection {
     private readonly socket: WebSocket,
     private readonly config: HubConfig,
     private readonly sessions: SessionStore,
-    private readonly agent: HermesModelAdapter,
+    private readonly agent: PsfnModelAdapter,
     private readonly tts: ElevenLabsStream,
   ) {}
 
@@ -317,6 +317,7 @@ class RealtimeConnection {
       const stream = this.agent.streamReply({
         userText: transcript,
         conversationId: this.sessionId,
+        history: this.sessions.getHistory(this.sessionId),
       });
       for await (const delta of stream) {
         if (this.replyAbort || replyId !== this.replySequence) {
