@@ -26,6 +26,7 @@ import {
 import { ElevenLabsStream } from "./elevenlabs-stream.js";
 import { PsfnModelAdapter } from "./psfn-model.js";
 import { SessionStore } from "./session-store.js";
+import { takeFlushChunk } from "../shared/text.js";
 
 export class RealtimeHubServer {
   private readonly httpServer = http.createServer((_, response) => {
@@ -285,35 +286,40 @@ class RealtimeConnection {
     const replyId = ++this.replySequence;
     this.replyAbort = false;
     let responseText = "";
-    const textQueue = new AsyncQueue<string>();
+    const audioSegmentQueue = new AsyncQueue<string>();
 
     const audioTask = (async () => {
-      let started = false;
-      for await (const audioChunk of this.tts.streamText(textQueue)) {
+      for await (const segmentText of audioSegmentQueue) {
         if (this.replyAbort || replyId !== this.replySequence) {
           break;
         }
-        if (!started) {
-          started = true;
-          await this.send({
-            type: "text",
-            data: "audio-init",
-          });
-        }
-        await this.send({
-          type: "audio",
-          data: encodeAudioChunk(audioChunk),
-        });
-      }
-      if (started && !this.replyAbort && replyId === this.replySequence) {
         await this.send({
           type: "text",
-          data: "audio-end",
+          data: "audio-init",
         });
+        let emittedAudio = false;
+        for await (const audioChunk of this.tts.streamText(singleValueStream(segmentText))) {
+          if (this.replyAbort || replyId !== this.replySequence) {
+            break;
+          }
+          emittedAudio = true;
+          await this.send({
+            type: "audio",
+            data: encodeAudioChunk(audioChunk),
+          });
+        }
+        if (emittedAudio && !this.replyAbort && replyId === this.replySequence) {
+          await this.send({
+            type: "text",
+            data: "audio-end",
+          });
+        }
       }
     })();
 
     try {
+      let pendingAudioText = "";
+      let audioHasStarted = false;
       const stream = this.agent.streamReply({
         userText: transcript,
         conversationId: this.sessionId,
@@ -324,7 +330,7 @@ class RealtimeConnection {
           break;
         }
         responseText += delta;
-        textQueue.push(delta);
+        pendingAudioText += delta;
         await this.send({
           type: "message",
           data: {
@@ -333,8 +339,22 @@ class RealtimeConnection {
             live: true,
           },
         });
+        while (true) {
+          const { flushText, remainder } = takeFlushChunk(pendingAudioText, {
+            hasStarted: audioHasStarted,
+          });
+          pendingAudioText = remainder;
+          if (!flushText) {
+            break;
+          }
+          audioSegmentQueue.push(flushText);
+          audioHasStarted = true;
+        }
       }
-      textQueue.close();
+      if (pendingAudioText.trim()) {
+        audioSegmentQueue.push(pendingAudioText.trim());
+      }
+      audioSegmentQueue.close();
       await audioTask;
 
       if (this.replyAbort || replyId !== this.replySequence) {
@@ -361,7 +381,7 @@ class RealtimeConnection {
         },
       });
     } catch (error) {
-      textQueue.close();
+      audioSegmentQueue.close();
       await audioTask.catch(() => undefined);
       writeJson(turn.replyPath, {
         sessionId: this.sessionId,
@@ -414,6 +434,10 @@ class RealtimeConnection {
     }
     this.socket.send(JSON.stringify(message));
   }
+}
+
+async function* singleValueStream(text: string): AsyncGenerator<string, void, void> {
+  yield text;
 }
 
 function decodeRawData(raw: RawData): string | null {

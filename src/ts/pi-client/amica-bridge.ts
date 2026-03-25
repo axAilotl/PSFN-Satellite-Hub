@@ -23,6 +23,16 @@ interface SatelliteAssistantFinalEvent {
   };
 }
 
+interface SatelliteAssistantSegmentEvent {
+  type: "assistant.segment";
+  data: SatelliteBridgeSessionEventData & {
+    text: string;
+    audioBase64: string;
+    mimeType: string;
+    durationMs?: number;
+  };
+}
+
 interface SatelliteInterruptEvent {
   type: "interrupt";
   data: SatelliteBridgeSessionEventData;
@@ -30,6 +40,7 @@ interface SatelliteInterruptEvent {
 
 type SatelliteBridgeEvent =
   | SatelliteUserFinalEvent
+  | SatelliteAssistantSegmentEvent
   | SatelliteAssistantFinalEvent
   | SatelliteInterruptEvent;
 
@@ -84,6 +95,17 @@ export class AmicaBridge {
   }
 
   async postAssistantFinal(text: string): Promise<number> {
+    return this.postAssistantAudioEvent("assistant.final", text);
+  }
+
+  async postAssistantSegment(text: string): Promise<number> {
+    return this.postAssistantAudioEvent("assistant.segment", text);
+  }
+
+  private async postAssistantAudioEvent(
+    type: SatelliteAssistantSegmentEvent["type"] | SatelliteAssistantFinalEvent["type"],
+    text: string,
+  ): Promise<number> {
     const normalized = text.trim();
     if (!normalized) {
       throw new Error("Amica bridge assistant text is empty");
@@ -97,7 +119,7 @@ export class AmicaBridge {
 
     try {
       await this.postEvent({
-        type: "assistant.final",
+        type,
         data: {
           sessionId: this.requireSessionId(),
           text: normalized,

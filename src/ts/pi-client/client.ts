@@ -6,6 +6,7 @@ import {
   encodeAudioChunk,
   type HubToClientMessage,
 } from "../shared/protocol.js";
+import { takeFlushChunk } from "../shared/text.js";
 import { AlsaVolumeController } from "./alsa-volume.js";
 import { AmicaBridge } from "./amica-bridge.js";
 import { StreamingAudioPlayer } from "./audio-player.js";
@@ -25,6 +26,9 @@ export class PiRealtimeClient {
   private requireNewAudioInit = true;
   private botSpeakEndSent = false;
   private assistantTurnOpen = false;
+  private assistantPendingText = "";
+  private readonly assistantTextSegments: string[] = [];
+  private assistantTextHasStarted = false;
   private userSpeaking = false;
   private lastVoiceActivityAt = 0;
   private interruptingUntil = 0;
@@ -156,10 +160,14 @@ export class PiRealtimeClient {
         }
         return;
       case "message":
+        if (message.data.live && message.data.role === "assistant") {
+          this.recordAssistantTextDelta(message.data.content);
+        }
         if (message.data.final && message.data.role === "user") {
           await this.handleFinalUser(message.data.content);
         }
         if (message.data.final && message.data.role === "assistant") {
+          this.finalizeAssistantText(message.data.content);
           await this.handleFinalAssistant(message.data.content);
         }
         return;
@@ -196,7 +204,12 @@ export class PiRealtimeClient {
     }
     if (signal === "audio-end") {
       this.sentenceCompleted = true;
-      if (!this.amicaBridge?.isOwnerMode()) {
+      if (this.amicaBridge?.isOwnerMode()) {
+        const durationMs = await this.amicaBridge.postAssistantSegment(
+          this.takeAssistantTextSegment(),
+        );
+        this.scheduleOwnerPlaybackEnd(durationMs);
+      } else {
         this.player.finish();
       }
       console.log("audio-end");
@@ -229,20 +242,8 @@ export class PiRealtimeClient {
       return;
     }
 
-    try {
-      const durationMs = await this.amicaBridge.postAssistantFinal(text);
-      if (this.amicaBridge.isOwnerMode()) {
-        this.scheduleOwnerPlaybackEnd(durationMs);
-      }
-    } catch (error) {
-      console.error("Amica bridge assistant final post failed:", error);
-      if (this.amicaBridge.isOwnerMode()) {
-        this.stopOwnerPlayback();
-      }
-      throw error;
-    } finally {
-      this.assistantTurnOpen = false;
-    }
+    this.finalizeAssistantText(text);
+    this.assistantTurnOpen = false;
   }
 
   private async handleChunk(chunk: AudioChunk): Promise<void> {
@@ -288,6 +289,7 @@ export class PiRealtimeClient {
     this.playbackActive = false;
     this.assistantTurnOpen = false;
     this.clearOwnerPlaybackTimer();
+    this.resetAssistantTextState();
     this.amicaBridge?.clearAssistantTurn();
     this.send({
       type: "text",
@@ -328,6 +330,7 @@ export class PiRealtimeClient {
     this.lastVoiceActivityAt = 0;
     this.interruptingUntil = 0;
     this.clearOwnerPlaybackTimer();
+    this.resetAssistantTextState();
     this.amicaBridge?.setSessionId(null);
     this.amicaBridge?.clearAssistantTurn();
   }
@@ -371,6 +374,7 @@ export class PiRealtimeClient {
     this.botSpeakEndSent = true;
     this.assistantTurnOpen = false;
     this.clearOwnerPlaybackTimer();
+    this.resetAssistantTextState();
     this.amicaBridge?.clearAssistantTurn();
     void this.ducking?.restore();
     if (shouldSendBotSpeakEnd) {
@@ -400,6 +404,54 @@ export class PiRealtimeClient {
     if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
       ws.close();
     }
+  }
+
+  private recordAssistantTextDelta(delta: string): void {
+    if (!delta) {
+      return;
+    }
+
+    this.assistantPendingText += delta;
+    while (true) {
+      const { flushText, remainder } = takeFlushChunk(this.assistantPendingText, {
+        hasStarted: this.assistantTextHasStarted,
+      });
+      this.assistantPendingText = remainder;
+      if (!flushText) {
+        break;
+      }
+      this.assistantTextSegments.push(flushText);
+      this.assistantTextHasStarted = true;
+    }
+  }
+
+  private finalizeAssistantText(finalText: string): void {
+    const remainder = this.assistantPendingText.trim();
+    this.assistantPendingText = "";
+    if (remainder) {
+      this.assistantTextSegments.push(remainder);
+      this.assistantTextHasStarted = true;
+      return;
+    }
+
+    if (this.assistantTextSegments.length === 0 && finalText.trim()) {
+      this.assistantTextSegments.push(finalText.trim());
+      this.assistantTextHasStarted = true;
+    }
+  }
+
+  private takeAssistantTextSegment(): string {
+    const text = this.assistantTextSegments.shift()?.trim();
+    if (!text) {
+      throw new Error("Assistant text segment was empty at audio-end");
+    }
+    return text;
+  }
+
+  private resetAssistantTextState(): void {
+    this.assistantPendingText = "";
+    this.assistantTextSegments.length = 0;
+    this.assistantTextHasStarted = false;
   }
 }
 
