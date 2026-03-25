@@ -33,6 +33,7 @@ AUDIO_DEVICE_CARD=${AUDIO_DEVICE_CARD:-P10S}
 AUDIO_INPUT_DEVICE=${AUDIO_INPUT_DEVICE:-plughw:CARD=P10S,DEV=0}
 AUDIO_OUTPUT_DEVICE=${AUDIO_OUTPUT_DEVICE:-default:CARD=P10S}
 AUDIO_INPUT_COMMAND=${AUDIO_INPUT_COMMAND:-pw-record --raw --rate 16000 --channels 1 --format s16 -}
+AUDIO_OUTPUT_COMMAND=${AUDIO_OUTPUT_COMMAND:-bash -lc "ffmpeg -hide_banner -loglevel error -fflags nobuffer -flags low_delay -probesize 32 -analyzeduration 0 -i pipe:0 -f s16le -acodec pcm_s16le -ar 44100 -ac 2 pipe:1 | pw-play --raw --rate 44100 --channels 2 --format s16 -"}
 ALSA_DUCK_CARD=${ALSA_DUCK_CARD:-2}
 ALSA_DUCK_CONTROL=${ALSA_DUCK_CONTROL:-PCM}
 ALSA_DUCK_PERCENT=${ALSA_DUCK_PERCENT:-8}
