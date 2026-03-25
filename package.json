@@ -1,0 +1,25 @@
+{
+  "name": "opanhome",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build:ts": "tsc -p tsconfig.json",
+    "hub:ts": "tsx src/ts/hub/main.ts",
+    "pi:ts": "tsx src/ts/pi-client/main.ts",
+    "smoke:ts": "node scripts/smoke-ts-hub.mjs",
+    "check:ts": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "openai": "^5.20.2",
+    "ws": "^8.18.3",
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}

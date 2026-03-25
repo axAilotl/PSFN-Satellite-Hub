@@ -4,8 +4,8 @@ Dual-path voice hub for Hermes.
 
 This repo is the middleware layer between voice endpoints and Hermes. It now has two device paths:
 
-- a custom realtime websocket path for Pi-class devices that can do smooth bidirectional conversation
-- an ESPHome Native API path for stock ESPHome voice devices and `linux-voice-assistant`
+- a custom TypeScript realtime websocket path for Pi-class devices that can do smooth bidirectional conversation
+- an ESPHome Native API fallback path for stock ESPHome voice devices and `linux-voice-assistant`
 
 The current testing target is global Hermes deployment first. Treat this repo as a bridge into a normal `~/.hermes` install, not as a scoped Hermes environment.
 
@@ -15,7 +15,7 @@ The hub in this repo does the heavy lifting:
 
 - accepts either a custom realtime voice client or an ESPHome voice device
 - streams microphone audio to Deepgram STT
-- applies turn endpointing and timeout logic
+- applies turn endpointing, interrupt, and timeout logic
 - sends recognized text into Hermes
 - streams Hermes text back into ElevenLabs TTS
 - returns assistant audio either as websocket chunks or ESPHome playback media
@@ -53,17 +53,17 @@ ESPHome device / linux-voice-assistant / ESP32 fallback
 
 Implemented:
 
+- TypeScript websocket hub for Pi-class clients
+- TypeScript Pi client with local preroll, local playback ownership, and explicit interrupt
+- explicit ALSA device routing and local playback ducking on Pi-class hardware
+- ESPHome fallback transport kept intact on the Python side
 - `hub probe` for metadata, entities, services, and state subscription
-- `hub transport-spike` for raw transport capture and artifact logging
-- `hub run` for the end-to-end voice loop
-- `DEVICE_TRANSPORT=esphome|realtime|hybrid`
-- custom realtime websocket transport for Pi-class clients
-- ESPHome fallback transport kept intact
+- `hub transport-spike` for raw ESPHome transport capture and artifact logging
 - persistent Deepgram websocket for STT
 - persistent ElevenLabs websocket for streamed TTS
-- persistent Hermes worker process with gateway-backed session context
+- Hermes-compatible conversation runtime driven from Hermes config/env
 - silence timeout, max-turn timeout, and reply timeout handling
-- local artifact capture under `.artifacts/runtime/`
+- local artifact capture under `.artifacts/runtime/` and `.artifacts/runtime-ts/`
 
 Current intent:
 
@@ -87,13 +87,19 @@ That split is deliberate. It keeps ESPHome transport concerns out of Hermes core
 
 ## Commands
 
-Install dependencies:
+Install Python dependencies for the ESPHome fallback path:
 
 ```bash
 uv sync --dev
 ```
 
-Show CLI help:
+Install TypeScript dependencies for the realtime hub/client path:
+
+```bash
+npm install
+```
+
+Show Python fallback CLI help:
 
 ```bash
 uv run hub --help
@@ -111,29 +117,35 @@ Capture raw voice transport artifacts:
 uv run hub transport-spike --host <device-ip> --noise-psk <base64-psk>
 ```
 
-Bootstrap against the global Hermes install and run the live bridge:
+Bootstrap against the global Hermes install and run the Python fallback bridge:
 
 ```bash
 ./scripts/use-global-hermes.sh
 uv run hub run
 ```
 
-Run both the custom realtime server and the ESPHome fallback together:
+Run the TypeScript realtime hub:
 
 ```bash
-DEVICE_TRANSPORT=hybrid uv run hub run
+npm run hub:ts
 ```
 
-Apply the current `linux-voice-assistant` fork patch used for interrupt/follow-up behavior:
+Run the TypeScript Pi client locally:
+
+```bash
+npm run pi:ts
+```
+
+Apply the current `linux-voice-assistant` fork patch used for ESPHome fallback interrupt/follow-up behavior:
 
 ```bash
 ./scripts/apply-linux-voice-assistant-patch.sh /path/to/linux-voice-assistant
 ```
 
-Deploy the dedicated Pi realtime client and disable `linux-voice-assistant` on that Pi:
+Deploy the dedicated TypeScript Pi realtime client and disable `linux-voice-assistant` on that Pi:
 
 ```bash
-PI_PASSWORD='<pi-password>' ./scripts/deploy-pi-realtime-client.sh <pi-host>
+PI_PASSWORD='<pi-password>' ./scripts/deploy-ts-pi-client.sh <pi-host>
 ```
 
 ## Configuration
@@ -149,7 +161,21 @@ Load order is:
 - `~/.hermes/.env` is then loaded as the shared Hermes/provider baseline
 - project `.env` is applied again last so bridge-specific overrides still win
 
-Important settings:
+Important settings for the TypeScript realtime path:
+
+- `HUB_WS_URL`
+- `AUDIO_DEVICE_CARD`
+- `AUDIO_INPUT_DEVICE`
+- `AUDIO_OUTPUT_DEVICE`
+- `ALSA_DUCK_CARD`
+- `ALSA_DUCK_CONTROL`
+- `ALSA_DUCK_PERCENT`
+- `VOICE_START_THRESHOLD`
+- `VOICE_CONTINUE_THRESHOLD`
+- `VOICE_AMBIENT_START_RATIO`
+- `VOICE_INTERRUPT_RATIO`
+
+Important settings for the Python ESPHome fallback path:
 
 - `DEVICE_TRANSPORT`
 - `ESPHOME_HOST`, `ESPHOME_PORT`, `ESPHOME_NOISE_PSK`
@@ -198,11 +224,12 @@ At the moment there are no required Hermes source patches in this repo. The brid
 
 Top-tier path:
 
-- custom realtime websocket client for Pi-class devices
+- custom TypeScript realtime websocket client for Pi-class devices
 - one persistent connection
 - explicit interrupt semantics
 - streamed assistant text and audio back to the client
-- current Pi W 2 deployment uses this path and has `linux-voice-assistant` disabled
+- local device-owned playback and ducking
+- current Pi-class deployment uses this path and has `linux-voice-assistant` disabled
 
 Fallback path:
 
@@ -232,44 +259,60 @@ This is intentionally endpoint-local. Hermes itself still does not require a sou
 
 ## Pi Realtime Client
 
-The dedicated Pi-class client lives under [client/pi_realtime](/mnt/samesung/ai/dev/opanhome/client/pi_realtime).
+The dedicated Pi-class TypeScript client lives under [src/ts/pi-client](/mnt/samesung/ai/dev/opanhome/src/ts/pi-client) with deploy assets under [client/ts_realtime](/mnt/samesung/ai/dev/opanhome/client/ts_realtime).
 
 It is the preferred path for devices that can afford a custom client, because it owns:
 
 - continuous local microphone capture
 - local preroll buffering
 - immediate playback stop on interrupt
+- explicit ALSA device selection
+- local playback ducking before interrupt
 - direct websocket streaming back to the hub
 
-Deployment details are in [client/pi_realtime/README.md](/mnt/samesung/ai/dev/opanhome/client/pi_realtime/README.md).
+Deploy with:
+
+```bash
+PI_PASSWORD='<pi-password>' ./scripts/deploy-ts-pi-client.sh <pi-host>
+```
 
 ## Repository Layout
 
 ```text
+src/ts/
+  hub/
+    main.ts
+    server.ts
+    deepgram-live.ts
+    hermes-model.ts
+    elevenlabs-stream.ts
+  pi-client/
+    main.ts
+    client.ts
+    audio-capture.ts
+    audio-player.ts
+    alsa-volume.ts
+  shared/
+    env.ts
+    protocol.ts
 hub/
   cli/
     probe.py
     run.py
   devices/
     esphome_session.py
-    realtime_server.py
     voice_runtime_streaming.py
-  adapters/
-    interfaces.py
-  media/
-    http_audio.py
-  runtime.py
-  storage/
-    session_cache.py
+client/ts_realtime/
+scripts/
 tests/
 ```
 
 ## Notes
 
-- The current runtime path is global-Hermes-first, using gateway-backed session context rather than a project-scoped Hermes install.
-- The repo now supports both a custom realtime client path and an ESPHome fallback path.
+- The current runtime path is global-Hermes-first, using Hermes-compatible config/env rather than a project-scoped Hermes install.
+- The repo now supports both a custom TypeScript realtime client path and an ESPHome fallback path.
 - Historical `.agent/` scaffolding exists in this repo, but it is not the main deployment target right now.
-- The bridge serves streamed audio on `AUDIO_SERVER_PORT` for announcement playback back to the device.
+- The Python fallback bridge still serves streamed audio on `AUDIO_SERVER_PORT` for announcement playback back to the device.
 - Turn artifacts are intentionally kept for debugging transport, latency, and failure recovery.
 
 ## Upstream Plan
@@ -284,10 +327,10 @@ That keeps the current experiment useful without forcing a large Hermes core cha
 
 ## Future Plans
 
-- smooth streaming TTS by buffering Hermes deltas into short phrase-sized chunks before each ElevenLabs flush
+- further smooth streaming TTS chunking and playback pacing on the TypeScript path
 - add better latency instrumentation around STT finalize, first Hermes token, first TTS audio, and playback start
 - support fully local STT providers behind the same adapter interface
 - support fully local TTS providers behind the same adapter interface
-- replace the current Pi-specific endpoint fork with a cleaner upstreamable `linux-voice-assistant` patch set or a dedicated endpoint implementation
+- keep the dedicated Pi client as the top-tier path while retaining ESPHome fallback compatibility
 - make the hub usable with a fully local speech stack before worrying about a polished upstream story
 - upstream the smallest Hermes-side streaming interface only after the bridge feels stable against the global deployment

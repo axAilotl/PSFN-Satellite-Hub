@@ -1,0 +1,16 @@
+[Unit]
+Description=Opanhome TypeScript Realtime Voice Client
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/home/%i/opanhome-ts-client
+EnvironmentFile=/etc/opanhome-ts-client.env
+ExecStart=/usr/bin/env npx tsx src/ts/pi-client/main.ts
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
