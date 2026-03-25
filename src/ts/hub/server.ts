@@ -315,7 +315,11 @@ class RealtimeConnection {
 
     try {
       const history = this.sessions.getHistory(this.sessionId);
-      const stream = this.agent.streamReply({ history, userText: transcript });
+      const stream = this.agent.streamReply({
+        history,
+        userText: transcript,
+        conversationId: this.sessionId,
+      });
       for await (const delta of stream) {
         if (this.replyAbort || replyId !== this.replySequence) {
           break;
