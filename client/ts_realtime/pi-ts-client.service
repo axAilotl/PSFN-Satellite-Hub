@@ -8,6 +8,10 @@ Type=simple
 User=%i
 WorkingDirectory=/home/%i/opanhome-ts-client
 EnvironmentFile=/etc/opanhome-ts-client.env
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+Environment=PULSE_SERVER=/run/user/1000/pulse/native
+Environment=PULSE_COOKIE=DISABLED
 ExecStart=/usr/bin/env npx tsx src/ts/pi-client/main.ts
 Restart=always
 RestartSec=2

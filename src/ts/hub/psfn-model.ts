@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 import type { ConversationMessage } from "./session-store.js";
 import type { PsfnRuntimeConfig } from "../shared/env.js";
 
@@ -20,7 +18,10 @@ export class PsfnModelAdapter {
     conversationId?: string;
     history?: ConversationMessage[];
   }): AsyncGenerator<string, string, void> {
-    const conversationId = input.conversationId?.trim() || `realtime:${randomUUID().slice(0, 12)}`;
+    const conversationId = input.conversationId?.trim();
+    if (!conversationId) {
+      throw new Error("PSFN conversation ID is required for the opanhome bridge");
+    }
     const response = await fetch(`${this.apiBaseUrl}/chat/completions`, {
       method: "POST",
       headers: this.buildHeaders(conversationId),
@@ -87,10 +88,8 @@ export class PsfnModelAdapter {
     }
     const channelId = deriveChannelId(conversationId);
     if (channelId) {
-      headers["X-PSFN-Channel-Type"] = "openhome";
+      headers["X-PSFN-Channel-Type"] = "psfn-amica";
       headers["X-PSFN-Channel-ID"] = channelId;
-      headers["X-PSFN-Author-ID"] = "openhome-user:owner";
-      headers["X-PSFN-Author-Name"] = "OpenHome User";
     }
     return headers;
   }
@@ -112,9 +111,7 @@ export class PsfnModelAdapter {
 function deriveChannelId(conversationId: string): string | null {
   const normalized = conversationId.trim();
   if (!normalized) return null;
-  if (normalized.startsWith("openhome:")) return normalized;
-  if (normalized.startsWith("realtime:")) return `openhome:${normalized}`;
-  return null;
+  return normalized.startsWith("psfn-amica:") ? normalized : null;
 }
 
 function extractDelta(payload: string): string {
