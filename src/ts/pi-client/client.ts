@@ -27,7 +27,6 @@ export class PiRealtimeClient {
   private userSpeaking = false;
   private lastVoiceActivityAt = 0;
   private interruptingUntil = 0;
-  private ownerPlaybackStartedAt = 0;
   private ownerPlaybackTimer: NodeJS.Timeout | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
 
@@ -92,6 +91,7 @@ export class PiRealtimeClient {
       const message = JSON.parse(json) as HubToClientMessage;
       void this.handleMessage(message).catch((error) => {
         console.error("Pi client message handling failed:", error);
+        this.failClosed(error);
       });
     });
     this.ws.on("close", () => {
@@ -167,7 +167,6 @@ export class PiRealtimeClient {
       this.botSpeakEndSent = false;
       this.assistantTurnOpen = true;
       this.playbackActive = true;
-      this.ownerPlaybackStartedAt = Date.now();
       this.clearOwnerPlaybackTimer();
       this.amicaBridge?.clearAssistantTurn();
       if (!this.amicaBridge?.isOwnerMode()) {
@@ -309,7 +308,6 @@ export class PiRealtimeClient {
     this.userSpeaking = false;
     this.lastVoiceActivityAt = 0;
     this.interruptingUntil = 0;
-    this.ownerPlaybackStartedAt = 0;
     this.clearOwnerPlaybackTimer();
     this.amicaBridge?.setSessionId(null);
     this.amicaBridge?.clearAssistantTurn();
@@ -320,8 +318,8 @@ export class PiRealtimeClient {
       return;
     }
     this.clearOwnerPlaybackTimer();
-    const elapsedMs = Date.now() - this.ownerPlaybackStartedAt;
-    const remainingMs = Math.max(0, durationMs - elapsedMs);
+    // Give the browser a small decode/start cushion before clearing speaking state.
+    const remainingMs = Math.max(0, durationMs + 250);
     this.ownerPlaybackTimer = setTimeout(() => {
       this.ownerPlaybackTimer = null;
       this.finishOwnerPlayback();
@@ -347,6 +345,7 @@ export class PiRealtimeClient {
   }
 
   private stopOwnerPlayback(): void {
+    const shouldSendBotSpeakEnd = this.playbackActive && !this.botSpeakEndSent;
     this.playbackActive = false;
     this.requireNewAudioInit = true;
     this.sentenceCompleted = false;
@@ -355,10 +354,12 @@ export class PiRealtimeClient {
     this.clearOwnerPlaybackTimer();
     this.amicaBridge?.clearAssistantTurn();
     void this.ducking?.restore();
-    this.send({
-      type: "text",
-      data: "bot-speak-end",
-    });
+    if (shouldSendBotSpeakEnd) {
+      this.send({
+        type: "text",
+        data: "bot-speak-end",
+      });
+    }
     console.log("playback.closed graceful=false");
   }
 
@@ -366,6 +367,19 @@ export class PiRealtimeClient {
     if (this.ownerPlaybackTimer) {
       clearTimeout(this.ownerPlaybackTimer);
       this.ownerPlaybackTimer = null;
+    }
+  }
+
+  private failClosed(error: unknown): void {
+    console.error("Pi client failing closed:", error);
+    this.player.stop();
+    this.stopOwnerPlayback();
+    const ws = this.ws;
+    if (!ws) {
+      return;
+    }
+    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+      ws.close();
     }
   }
 }
