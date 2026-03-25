@@ -7,6 +7,7 @@ import {
   type HubToClientMessage,
 } from "../shared/protocol.js";
 import { AlsaVolumeController } from "./alsa-volume.js";
+import { AmicaBridge } from "./amica-bridge.js";
 import { StreamingAudioPlayer } from "./audio-player.js";
 import { AudioCapture, type AudioChunk } from "./audio-capture.js";
 
@@ -15,21 +16,26 @@ export class PiRealtimeClient {
   private readonly player: StreamingAudioPlayer;
   private readonly capture: AudioCapture;
   private readonly ducking: AlsaVolumeController | null;
+  private readonly amicaBridge: AmicaBridge | null;
   private ready = false;
   private playbackActive = false;
   private playbackGeneration = 0;
   private sentenceCompleted = false;
   private requireNewAudioInit = true;
   private botSpeakEndSent = false;
+  private assistantTurnOpen = false;
   private userSpeaking = false;
   private lastVoiceActivityAt = 0;
   private interruptingUntil = 0;
+  private ownerPlaybackStartedAt = 0;
+  private ownerPlaybackTimer: NodeJS.Timeout | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly config: PiClientConfig) {
     this.player = new StreamingAudioPlayer(config.outputCommand);
     this.capture = new AudioCapture(config.inputCommand, config.micGain);
     this.ducking = config.ducking ? new AlsaVolumeController(config.ducking) : null;
+    this.amicaBridge = config.amicaBridge ? new AmicaBridge(config.amicaBridge) : null;
 
     this.player.on("closed", ({ graceful, generation }) => {
       if (generation !== this.playbackGeneration) {
@@ -84,7 +90,9 @@ export class PiRealtimeClient {
         return;
       }
       const message = JSON.parse(json) as HubToClientMessage;
-      void this.handleMessage(message);
+      void this.handleMessage(message).catch((error) => {
+        console.error("Pi client message handling failed:", error);
+      });
     });
     this.ws.on("close", () => {
       this.player.stop();
@@ -109,6 +117,8 @@ export class PiRealtimeClient {
     switch (message.type) {
       case "session.ready":
       case "hello.ack":
+        this.amicaBridge?.setSessionId(message.sessionId);
+        return;
       case "pong":
         return;
       case "status":
@@ -124,7 +134,7 @@ export class PiRealtimeClient {
         if (this.requireNewAudioInit || !message.data) {
           return;
         }
-        this.player.write(decodeAudioChunk(message.data));
+        await this.handleAudioChunk(decodeAudioChunk(message.data));
         return;
       case "action":
         if (message.data === "interrupt") {
@@ -132,8 +142,11 @@ export class PiRealtimeClient {
         }
         return;
       case "message":
+        if (message.data.final && message.data.role === "user") {
+          await this.handleFinalUser(message.data.content);
+        }
         if (message.data.final && message.data.role === "assistant") {
-          console.log(`assistant.final ${JSON.stringify(message.data.content)}`);
+          await this.handleFinalAssistant(message.data.content);
         }
         return;
       case "assistant.interrupted":
@@ -152,8 +165,14 @@ export class PiRealtimeClient {
       this.requireNewAudioInit = false;
       this.sentenceCompleted = false;
       this.botSpeakEndSent = false;
+      this.assistantTurnOpen = true;
       this.playbackActive = true;
-      this.playbackGeneration = this.player.start();
+      this.ownerPlaybackStartedAt = Date.now();
+      this.clearOwnerPlaybackTimer();
+      this.amicaBridge?.clearAssistantTurn();
+      if (!this.amicaBridge?.isOwnerMode()) {
+        this.playbackGeneration = this.player.start();
+      }
       await this.ducking?.restore();
       this.send({
         type: "text",
@@ -164,8 +183,52 @@ export class PiRealtimeClient {
     }
     if (signal === "audio-end") {
       this.sentenceCompleted = true;
-      this.player.finish();
+      if (!this.amicaBridge?.isOwnerMode()) {
+        this.player.finish();
+      }
       console.log("audio-end");
+    }
+  }
+
+  private async handleAudioChunk(chunk: Buffer): Promise<void> {
+    if (this.amicaBridge) {
+      this.amicaBridge.recordAssistantAudio(chunk);
+    }
+    if (!this.amicaBridge?.isOwnerMode()) {
+      this.player.write(chunk);
+    }
+  }
+
+  private async handleFinalUser(text: string): Promise<void> {
+    if (!this.amicaBridge) {
+      return;
+    }
+    await this.amicaBridge.postUserFinal(text);
+  }
+
+  private async handleFinalAssistant(text: string): Promise<void> {
+    if (!this.assistantTurnOpen) {
+      return;
+    }
+
+    if (!this.amicaBridge) {
+      this.assistantTurnOpen = false;
+      return;
+    }
+
+    try {
+      const durationMs = await this.amicaBridge.postAssistantFinal(text);
+      if (this.amicaBridge.isOwnerMode()) {
+        this.scheduleOwnerPlaybackEnd(durationMs);
+      }
+    } catch (error) {
+      console.error("Amica bridge assistant final post failed:", error);
+      if (this.amicaBridge.isOwnerMode()) {
+        this.stopOwnerPlayback();
+      }
+      throw error;
+    } finally {
+      this.assistantTurnOpen = false;
     }
   }
 
@@ -184,7 +247,9 @@ export class PiRealtimeClient {
     }
 
     if (this.playbackActive && speech && now >= this.interruptingUntil) {
-      await this.ducking?.duck();
+      if (!this.amicaBridge?.isOwnerMode()) {
+        await this.ducking?.duck();
+      }
       await this.detectInterrupt();
     }
 
@@ -203,12 +268,22 @@ export class PiRealtimeClient {
     this.sentenceCompleted = false;
     this.botSpeakEndSent = true;
     this.playbackActive = false;
+    this.assistantTurnOpen = false;
+    this.clearOwnerPlaybackTimer();
+    this.amicaBridge?.clearAssistantTurn();
     this.send({
       type: "text",
       data: "interrupt-event",
     });
-    this.player.stop();
+    if (!this.amicaBridge?.isOwnerMode()) {
+      this.player.stop();
+    }
     await this.ducking?.restore();
+    try {
+      await this.amicaBridge?.postInterrupt();
+    } catch (error) {
+      console.error("Amica bridge interrupt post failed:", error);
+    }
     this.send({
       type: "text",
       data: "bot-speak-end",
@@ -230,9 +305,68 @@ export class PiRealtimeClient {
     this.sentenceCompleted = false;
     this.requireNewAudioInit = true;
     this.botSpeakEndSent = false;
+    this.assistantTurnOpen = false;
     this.userSpeaking = false;
     this.lastVoiceActivityAt = 0;
     this.interruptingUntil = 0;
+    this.ownerPlaybackStartedAt = 0;
+    this.clearOwnerPlaybackTimer();
+    this.amicaBridge?.setSessionId(null);
+    this.amicaBridge?.clearAssistantTurn();
+  }
+
+  private scheduleOwnerPlaybackEnd(durationMs: number): void {
+    if (!this.amicaBridge?.isOwnerMode()) {
+      return;
+    }
+    this.clearOwnerPlaybackTimer();
+    const elapsedMs = Date.now() - this.ownerPlaybackStartedAt;
+    const remainingMs = Math.max(0, durationMs - elapsedMs);
+    this.ownerPlaybackTimer = setTimeout(() => {
+      this.ownerPlaybackTimer = null;
+      this.finishOwnerPlayback();
+    }, remainingMs);
+  }
+
+  private finishOwnerPlayback(): void {
+    if (!this.playbackActive || this.botSpeakEndSent) {
+      return;
+    }
+    this.playbackActive = false;
+    this.requireNewAudioInit = true;
+    this.sentenceCompleted = false;
+    this.botSpeakEndSent = true;
+    this.assistantTurnOpen = false;
+    this.clearOwnerPlaybackTimer();
+    void this.ducking?.restore();
+    this.send({
+      type: "text",
+      data: "bot-speak-end",
+    });
+    console.log("playback.closed graceful=true");
+  }
+
+  private stopOwnerPlayback(): void {
+    this.playbackActive = false;
+    this.requireNewAudioInit = true;
+    this.sentenceCompleted = false;
+    this.botSpeakEndSent = true;
+    this.assistantTurnOpen = false;
+    this.clearOwnerPlaybackTimer();
+    this.amicaBridge?.clearAssistantTurn();
+    void this.ducking?.restore();
+    this.send({
+      type: "text",
+      data: "bot-speak-end",
+    });
+    console.log("playback.closed graceful=false");
+  }
+
+  private clearOwnerPlaybackTimer(): void {
+    if (this.ownerPlaybackTimer) {
+      clearTimeout(this.ownerPlaybackTimer);
+      this.ownerPlaybackTimer = null;
+    }
   }
 }
 

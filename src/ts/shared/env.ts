@@ -35,6 +35,7 @@ export interface PiClientConfig {
   deviceId: string;
   deviceName: string;
   conversationId?: string;
+  amicaBridge: AmicaBridgeConfig | null;
   inputCommand: string[];
   outputCommand: string[];
   sampleRate: number;
@@ -55,6 +56,13 @@ export interface PiClientConfig {
     mixerControl: string;
     duckPercent: number;
   } | null;
+}
+
+export interface AmicaBridgeConfig {
+  endpointUrl: string;
+  token: string;
+  ownerMode: boolean;
+  requestTimeoutMs: number;
 }
 
 export function resolveProjectRoot(): string {
@@ -108,12 +116,14 @@ export function loadPiClientConfig(projectRoot: string): PiClientConfig {
     (audioCard ? `default:CARD=${audioCard}` : "default");
   const duckCard = process.env.ALSA_DUCK_CARD?.trim() || audioCard;
   const duckControl = process.env.ALSA_DUCK_CONTROL?.trim() || "PCM";
+  const amicaBridge = loadAmicaBridgeConfig();
 
   return {
     hubUrl: process.env.HUB_WS_URL || "ws://192.168.1.220:8787/",
     deviceId: process.env.DEVICE_ID || os.hostname(),
     deviceName: process.env.DEVICE_NAME || `Opanhome TS Client (${os.hostname()})`,
     conversationId: optional("CONVERSATION_ID"),
+    amicaBridge,
     inputCommand: splitCommand(
       process.env.AUDIO_INPUT_COMMAND ||
         `arecord -q -f S16_LE -r ${sampleRate} -c 1 -D ${inputDevice} -t raw`,
@@ -142,6 +152,38 @@ export function loadPiClientConfig(projectRoot: string): PiClientConfig {
           duckPercent: Number.parseInt(process.env.ALSA_DUCK_PERCENT || "8", 10),
         }
       : null,
+  };
+}
+
+function loadAmicaBridgeConfig(): AmicaBridgeConfig | null {
+  const endpointUrl = optional("AMICA_BRIDGE_URL");
+  const token = optional("AMICA_BRIDGE_TOKEN");
+  const ownerMode = process.env.AMICA_BRIDGE_OWNER_MODE?.trim() === "true";
+  const requestTimeoutMs = Number.parseInt(
+    process.env.AMICA_BRIDGE_TIMEOUT_MS || "5000",
+    10,
+  );
+
+  if (!endpointUrl && !token && !ownerMode && !process.env.AMICA_BRIDGE_TIMEOUT_MS) {
+    return null;
+  }
+  if (!endpointUrl) {
+    throw new Error("Missing required environment variable: AMICA_BRIDGE_URL");
+  }
+  if (!token) {
+    throw new Error("Missing required environment variable: AMICA_BRIDGE_TOKEN");
+  }
+
+  const normalizedUrl = new URL(endpointUrl).toString();
+  if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs < 0) {
+    throw new Error("AMICA_BRIDGE_TIMEOUT_MS must be a non-negative integer");
+  }
+
+  return {
+    endpointUrl: normalizedUrl,
+    token,
+    ownerMode,
+    requestTimeoutMs,
   };
 }
 
