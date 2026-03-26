@@ -34,6 +34,7 @@ export class PiRealtimeClient {
   private interruptingUntil = 0;
   private ownerPlaybackTimer: NodeJS.Timeout | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
+  private messageChain: Promise<void> = Promise.resolve();
 
   constructor(private readonly config: PiClientConfig) {
     this.player = new StreamingAudioPlayer(config.outputCommand);
@@ -107,10 +108,12 @@ export class PiRealtimeClient {
         return;
       }
       const message = JSON.parse(json) as HubToClientMessage;
-      void this.handleMessage(message).catch((error) => {
-        console.error("Pi client message handling failed:", error);
-        this.failClosed(error);
-      });
+      this.messageChain = this.messageChain
+        .then(() => this.handleMessage(message))
+        .catch((error) => {
+          console.error("Pi client message handling failed:", error);
+          this.failClosed(error);
+        });
     });
     this.ws.on("close", () => {
       this.player.stop();
@@ -167,7 +170,6 @@ export class PiRealtimeClient {
           await this.handleFinalUser(message.data.content);
         }
         if (message.data.final && message.data.role === "assistant") {
-          this.finalizeAssistantText(message.data.content);
           await this.handleFinalAssistant(message.data.content);
         }
         return;
@@ -184,17 +186,16 @@ export class PiRealtimeClient {
 
   private async handleTextSignal(signal: string): Promise<void> {
     if (signal === "audio-init") {
-      const startingOwnerTurn = this.amicaBridge?.isOwnerMode() && !this.assistantTurnOpen;
       this.requireNewAudioInit = false;
       this.sentenceCompleted = false;
       this.botSpeakEndSent = false;
-      if (startingOwnerTurn) {
+      if (this.amicaBridge?.isOwnerMode() && !this.assistantTurnOpen) {
         this.resetAssistantTextState();
-        this.amicaBridge?.clearAssistantTurn();
       }
       this.assistantTurnOpen = true;
       this.playbackActive = true;
       this.clearOwnerPlaybackTimer();
+      this.amicaBridge?.clearAssistantTurn();
       if (!this.amicaBridge?.isOwnerMode()) {
         this.playbackGeneration = this.player.start();
       }
@@ -209,8 +210,18 @@ export class PiRealtimeClient {
     if (signal === "audio-end") {
       this.sentenceCompleted = true;
       if (this.amicaBridge?.isOwnerMode()) {
-        console.log("audio-end");
-        return;
+        const text = this.takeAssistantTextSegment();
+        if (!text) {
+          console.warn("owner-mode segment ended before assistant text was ready");
+          return;
+        }
+        if (this.amicaBridge.estimateAssistantAudioDurationMs() === 0) {
+          console.warn("owner-mode segment ended without buffered audio");
+          this.amicaBridge.clearAssistantTurn();
+          return;
+        }
+        const durationMs = await this.amicaBridge.postAssistantSegment(text);
+        this.scheduleOwnerPlaybackEnd(durationMs);
       } else {
         this.player.finish();
       }
@@ -244,25 +255,8 @@ export class PiRealtimeClient {
       return;
     }
 
-    if (!this.amicaBridge.isOwnerMode()) {
-      this.finalizeAssistantText(text);
-      this.assistantTurnOpen = false;
-      return;
-    }
-
-    const normalized = text.trim();
+    this.finalizeAssistantText(text);
     this.assistantTurnOpen = false;
-    this.resetAssistantTextState();
-    if (!normalized) {
-      return;
-    }
-    if (this.amicaBridge.estimateAssistantAudioDurationMs() === 0) {
-      console.warn("assistant.final skipped because no owner-mode audio was buffered");
-      return;
-    }
-
-    const durationMs = await this.amicaBridge.postAssistantFinal(normalized);
-    this.scheduleOwnerPlaybackEnd(durationMs);
   }
 
   private async handleChunk(chunk: AudioChunk): Promise<void> {
@@ -467,6 +461,11 @@ export class PiRealtimeClient {
       this.assistantTextSegments.push(finalText.trim());
       this.assistantTextHasStarted = true;
     }
+  }
+
+  private takeAssistantTextSegment(): string | null {
+    const text = this.assistantTextSegments.shift()?.trim();
+    return text || null;
   }
 
   private resetAssistantTextState(): void {
