@@ -42,6 +42,13 @@ export function takeFlushChunk(
   return { flushText: flushText || null, remainder };
 }
 
+export const SPOKEN_SEGMENT_FLUSH_OPTIONS = Object.freeze({
+  firstWords: 4,
+  firstChars: 40,
+  softLimit: 140,
+  hardLimit: 220,
+});
+
 export function sanitizeSpokenText(input: string): string {
   return input
     .replace(/\*{1,2}[^*]+\*{1,2}/g, " ")

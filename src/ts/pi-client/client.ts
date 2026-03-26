@@ -6,7 +6,11 @@ import {
   encodeAudioChunk,
   type HubToClientMessage,
 } from "../shared/protocol.js";
-import { sanitizeSpokenText, takeFlushChunk } from "../shared/text.js";
+import {
+  sanitizeSpokenText,
+  SPOKEN_SEGMENT_FLUSH_OPTIONS,
+  takeFlushChunk,
+} from "../shared/text.js";
 import { AlsaVolumeController } from "./alsa-volume.js";
 import { AmicaBridge } from "./amica-bridge.js";
 import { StreamingAudioPlayer } from "./audio-player.js";
@@ -461,6 +465,7 @@ export class PiRealtimeClient {
     while (true) {
       const { flushText, remainder } = takeFlushChunk(this.assistantPendingText, {
         hasStarted: this.assistantTextHasStarted,
+        ...SPOKEN_SEGMENT_FLUSH_OPTIONS,
       });
       this.assistantPendingText = remainder;
       if (!flushText) {

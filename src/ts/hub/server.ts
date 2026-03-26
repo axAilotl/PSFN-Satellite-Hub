@@ -26,7 +26,11 @@ import {
 import { ElevenLabsStream } from "./elevenlabs-stream.js";
 import { PsfnModelAdapter } from "./psfn-model.js";
 import { SessionStore } from "./session-store.js";
-import { sanitizeSpokenText, takeFlushChunk } from "../shared/text.js";
+import {
+  sanitizeSpokenText,
+  SPOKEN_SEGMENT_FLUSH_OPTIONS,
+  takeFlushChunk,
+} from "../shared/text.js";
 
 export class RealtimeHubServer {
   private readonly httpServer = http.createServer((_, response) => {
@@ -346,10 +350,7 @@ class RealtimeConnection {
         while (true) {
           const { flushText, remainder } = takeFlushChunk(pendingAudioText, {
             hasStarted: audioHasStarted,
-            firstWords: 4,
-            firstChars: 40,
-            softLimit: 140,
-            hardLimit: 220,
+            ...SPOKEN_SEGMENT_FLUSH_OPTIONS,
           });
           pendingAudioText = remainder;
           if (!flushText) {
