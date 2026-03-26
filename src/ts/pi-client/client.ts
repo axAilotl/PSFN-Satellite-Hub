@@ -35,6 +35,7 @@ export class PiRealtimeClient {
   private ownerPlaybackTimer: NodeJS.Timeout | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private messageChain: Promise<void> = Promise.resolve();
+  private pendingOwnerSegments = 0;
 
   constructor(private readonly config: PiClientConfig) {
     this.player = new StreamingAudioPlayer(config.outputCommand);
@@ -165,6 +166,7 @@ export class PiRealtimeClient {
       case "message":
         if (message.data.live && message.data.role === "assistant") {
           this.recordAssistantTextDelta(message.data.content);
+          await this.flushOwnerModeSegments();
         }
         if (message.data.final && message.data.role === "user") {
           await this.handleFinalUser(message.data.content);
@@ -186,16 +188,18 @@ export class PiRealtimeClient {
 
   private async handleTextSignal(signal: string): Promise<void> {
     if (signal === "audio-init") {
+      const startingOwnerTurn = this.amicaBridge?.isOwnerMode() && !this.assistantTurnOpen;
       this.requireNewAudioInit = false;
       this.sentenceCompleted = false;
       this.botSpeakEndSent = false;
-      if (this.amicaBridge?.isOwnerMode() && !this.assistantTurnOpen) {
+      if (startingOwnerTurn) {
         this.resetAssistantTextState();
+        this.pendingOwnerSegments = 0;
+        this.amicaBridge?.clearAssistantTurn();
       }
       this.assistantTurnOpen = true;
       this.playbackActive = true;
       this.clearOwnerPlaybackTimer();
-      this.amicaBridge?.clearAssistantTurn();
       if (!this.amicaBridge?.isOwnerMode()) {
         this.playbackGeneration = this.player.start();
       }
@@ -210,18 +214,12 @@ export class PiRealtimeClient {
     if (signal === "audio-end") {
       this.sentenceCompleted = true;
       if (this.amicaBridge?.isOwnerMode()) {
-        const text = this.takeAssistantTextSegment();
-        if (!text) {
-          console.warn("owner-mode segment ended before assistant text was ready");
-          return;
-        }
-        if (this.amicaBridge.estimateAssistantAudioDurationMs() === 0) {
+        if (!this.amicaBridge.sealAssistantAudioSegment()) {
           console.warn("owner-mode segment ended without buffered audio");
-          this.amicaBridge.clearAssistantTurn();
           return;
         }
-        const durationMs = await this.amicaBridge.postAssistantSegment(text);
-        this.scheduleOwnerPlaybackEnd(durationMs);
+        this.pendingOwnerSegments += 1;
+        await this.flushOwnerModeSegments();
       } else {
         this.player.finish();
       }
@@ -257,6 +255,7 @@ export class PiRealtimeClient {
 
     this.finalizeAssistantText(text);
     this.assistantTurnOpen = false;
+    await this.flushOwnerModeSegments();
   }
 
   private async handleChunk(chunk: AudioChunk): Promise<void> {
@@ -302,6 +301,7 @@ export class PiRealtimeClient {
     this.playbackActive = false;
     this.assistantTurnOpen = false;
     this.clearOwnerPlaybackTimer();
+    this.pendingOwnerSegments = 0;
     this.resetAssistantTextState();
     this.amicaBridge?.clearAssistantTurn();
     this.send({
@@ -343,6 +343,7 @@ export class PiRealtimeClient {
     this.lastVoiceActivityAt = 0;
     this.interruptingUntil = 0;
     this.clearOwnerPlaybackTimer();
+    this.pendingOwnerSegments = 0;
     this.resetAssistantTextState();
     this.amicaBridge?.setSessionId(null);
     this.amicaBridge?.clearAssistantTurn();
@@ -371,6 +372,7 @@ export class PiRealtimeClient {
     this.botSpeakEndSent = true;
     this.assistantTurnOpen = false;
     this.clearOwnerPlaybackTimer();
+    this.pendingOwnerSegments = 0;
     void this.ducking?.restore();
     this.send({
       type: "text",
@@ -472,6 +474,24 @@ export class PiRealtimeClient {
     this.assistantPendingText = "";
     this.assistantTextSegments.length = 0;
     this.assistantTextHasStarted = false;
+  }
+
+  private async flushOwnerModeSegments(): Promise<void> {
+    if (!this.amicaBridge?.isOwnerMode()) {
+      return;
+    }
+    while (
+      this.pendingOwnerSegments > 0 &&
+      this.amicaBridge.hasQueuedAssistantAudio()
+    ) {
+      const text = this.takeAssistantTextSegment();
+      if (!text) {
+        return;
+      }
+      const durationMs = await this.amicaBridge.postAssistantSegment(text);
+      this.pendingOwnerSegments -= 1;
+      this.scheduleOwnerPlaybackEnd(durationMs);
+    }
   }
 }
 

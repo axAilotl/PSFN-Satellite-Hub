@@ -47,8 +47,12 @@ type SatelliteBridgeEvent =
 export class AmicaBridge {
   private readonly endpointUrl: URL;
   private sessionId: string | null = null;
-  private assistantAudioChunks: Buffer[] = [];
-  private assistantAudioBytes = 0;
+  private currentAssistantAudioChunks: Buffer[] = [];
+  private currentAssistantAudioBytes = 0;
+  private assistantAudioSegments: Array<{
+    audioChunks: Buffer[];
+    audioBytes: number;
+  }> = [];
 
   constructor(private readonly config: AmicaBridgeConfig) {
     this.endpointUrl = new URL(config.endpointUrl);
@@ -64,20 +68,39 @@ export class AmicaBridge {
   }
 
   clearAssistantTurn(): void {
-    this.assistantAudioChunks = [];
-    this.assistantAudioBytes = 0;
+    this.currentAssistantAudioChunks = [];
+    this.currentAssistantAudioBytes = 0;
+    this.assistantAudioSegments = [];
   }
 
   recordAssistantAudio(chunk: Buffer): void {
     if (chunk.length === 0) {
       return;
     }
-    this.assistantAudioChunks.push(Buffer.from(chunk));
-    this.assistantAudioBytes += chunk.length;
+    this.currentAssistantAudioChunks.push(Buffer.from(chunk));
+    this.currentAssistantAudioBytes += chunk.length;
+  }
+
+  sealAssistantAudioSegment(): boolean {
+    if (this.currentAssistantAudioBytes === 0) {
+      return false;
+    }
+    this.assistantAudioSegments.push({
+      audioChunks: this.currentAssistantAudioChunks,
+      audioBytes: this.currentAssistantAudioBytes,
+    });
+    this.currentAssistantAudioChunks = [];
+    this.currentAssistantAudioBytes = 0;
+    return true;
+  }
+
+  hasQueuedAssistantAudio(): boolean {
+    return this.assistantAudioSegments.length > 0 || this.currentAssistantAudioBytes > 0;
   }
 
   estimateAssistantAudioDurationMs(): number {
-    return Math.max(0, Math.round(this.assistantAudioBytes / 16));
+    const audioBytes = this.assistantAudioSegments[0]?.audioBytes ?? this.currentAssistantAudioBytes;
+    return Math.max(0, Math.round(audioBytes / 16));
   }
 
   async postUserFinal(text: string): Promise<void> {
@@ -110,28 +133,25 @@ export class AmicaBridge {
     if (!normalized) {
       throw new Error("Amica bridge assistant text is empty");
     }
-    if (this.assistantAudioBytes === 0) {
+    const segment = this.takeAssistantAudioSegment();
+    if (!segment) {
       throw new Error("Amica bridge assistant audio is empty");
     }
 
-    const durationMs = this.estimateAssistantAudioDurationMs();
-    const audioBase64 = Buffer.concat(this.assistantAudioChunks).toString("base64");
+    const durationMs = Math.max(0, Math.round(segment.audioBytes / 16));
+    const audioBase64 = Buffer.concat(segment.audioChunks).toString("base64");
 
-    try {
-      await this.postEvent({
-        type,
-        data: {
-          sessionId: this.requireSessionId(),
-          text: normalized,
-          audioBase64,
-          mimeType: "audio/mpeg",
-          durationMs: durationMs > 0 ? durationMs : undefined,
-        },
-      });
-      return durationMs;
-    } finally {
-      this.clearAssistantTurn();
-    }
+    await this.postEvent({
+      type,
+      data: {
+        sessionId: this.requireSessionId(),
+        text: normalized,
+        audioBase64,
+        mimeType: "audio/mpeg",
+        durationMs: durationMs > 0 ? durationMs : undefined,
+      },
+    });
+    return durationMs;
   }
 
   async postInterrupt(): Promise<void> {
@@ -149,6 +169,25 @@ export class AmicaBridge {
       throw new Error("Amica bridge session ID is not available yet");
     }
     return this.sessionId;
+  }
+
+  private takeAssistantAudioSegment(): {
+    audioChunks: Buffer[];
+    audioBytes: number;
+  } | null {
+    if (this.assistantAudioSegments.length > 0) {
+      return this.assistantAudioSegments.shift() ?? null;
+    }
+    if (this.currentAssistantAudioBytes === 0) {
+      return null;
+    }
+    const segment = {
+      audioChunks: this.currentAssistantAudioChunks,
+      audioBytes: this.currentAssistantAudioBytes,
+    };
+    this.currentAssistantAudioChunks = [];
+    this.currentAssistantAudioBytes = 0;
+    return segment;
   }
 
   private async postEvent(event: SatelliteBridgeEvent): Promise<void> {
