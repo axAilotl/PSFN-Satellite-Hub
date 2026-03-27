@@ -12,26 +12,34 @@ export function takeFlushChunk(
   const firstChars = options.firstChars ?? 18;
   const softLimit = options.softLimit ?? 64;
   const hardLimit = options.hardLimit ?? 120;
+  const flushableInput = limitFlushablePrefix(input);
 
   if (!input) {
     return { flushText: null, remainder: input };
   }
+  if (!flushableInput) {
+    return { flushText: null, remainder: input };
+  }
 
-  let boundary = sentenceBoundary(input);
-  const trailingBoundary = trailingWhitespaceBoundary(input);
+  let boundary = sentenceBoundary(flushableInput);
+  const trailingBoundary = trailingWhitespaceBoundary(flushableInput);
   if (
     boundary === null &&
     trailingBoundary !== null &&
     !options.hasStarted &&
-    shouldStartPlayback(input, firstWords, firstChars)
+    shouldStartPlayback(flushableInput, firstWords, firstChars)
   ) {
     boundary = trailingBoundary;
   }
-  if (boundary === null && trailingBoundary !== null && input.trim().length >= softLimit) {
+  if (
+    boundary === null &&
+    trailingBoundary !== null &&
+    flushableInput.trim().length >= softLimit
+  ) {
     boundary = trailingBoundary;
   }
-  if (boundary === null && input.trim().length >= hardLimit) {
-    boundary = input.length;
+  if (boundary === null && flushableInput.trim().length >= hardLimit) {
+    boundary = flushableInput.length;
   }
   if (boundary === null) {
     return { flushText: null, remainder: input };
@@ -50,8 +58,7 @@ export const SPOKEN_SEGMENT_FLUSH_OPTIONS = Object.freeze({
 });
 
 export function sanitizeSpokenText(input: string): string {
-  return input
-    .replace(/\*{1,2}[^*]+\*{1,2}/g, " ")
+  return stripDelimitedStageDirections(input)
     .replace(/[\u{1F600}-\u{1F64F}]/gu, "")
     .replace(/[\u{1F300}-\u{1F5FF}]/gu, "")
     .replace(/[\u{1F680}-\u{1F6FF}]/gu, "")
@@ -62,6 +69,78 @@ export function sanitizeSpokenText(input: string): string {
     .replace(/^:D/gu, "")
     .replace(/\s{2,}/g, " ")
     .trim();
+}
+
+function stripDelimitedStageDirections(input: string): string {
+  let output = "";
+  let index = 0;
+  let activeDelimiter: "*" | "_" | null = null;
+
+  while (index < input.length) {
+    const char = input[index];
+    if (char !== "*" && char !== "_") {
+      if (!activeDelimiter) {
+        output += char;
+      }
+      index += 1;
+      continue;
+    }
+
+    const delimiter = char as "*" | "_";
+    while (input[index] === delimiter) {
+      index += 1;
+    }
+
+    if (activeDelimiter === delimiter) {
+      activeDelimiter = null;
+      continue;
+    }
+
+    if (!activeDelimiter) {
+      activeDelimiter = delimiter;
+    }
+  }
+
+  return output;
+}
+
+function limitFlushablePrefix(input: string): string {
+  const unmatchedStart = findUnmatchedDelimitedSpanStart(input);
+  if (unmatchedStart === null) {
+    return input;
+  }
+  return input.slice(0, unmatchedStart);
+}
+
+function findUnmatchedDelimitedSpanStart(input: string): number | null {
+  let activeDelimiter: "*" | "_" | null = null;
+  let activeStart: number | null = null;
+
+  for (let index = 0; index < input.length; index += 1) {
+    const char = input[index];
+    if (char !== "*" && char !== "_") {
+      continue;
+    }
+
+    const delimiter = char as "*" | "_";
+    const runStart = index;
+    while (input[index + 1] === delimiter) {
+      index += 1;
+    }
+
+    if (activeDelimiter === delimiter) {
+      activeDelimiter = null;
+      activeStart = null;
+      continue;
+    }
+
+    if (!activeDelimiter) {
+      activeDelimiter = delimiter;
+      activeStart = runStart;
+    }
+  }
+
+  return activeStart;
 }
 
 function sentenceBoundary(input: string): number | null {
