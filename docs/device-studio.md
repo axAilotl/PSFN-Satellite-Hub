@@ -362,6 +362,71 @@ Renderers map semantic expression and viseme IDs into concrete visuals:
 - Firmware export maps them to sprite sheets, RGB565 data, or embedded behavior
   tables in a later pipeline.
 
+## Stack-chan 3D Asset Intake
+
+The Stack-chan physical preview uses a manifest before it uses a CAD file. The
+repo-local manifest lives in `src/ts/device-studio/assets.ts` and defines:
+
+- canonical source path: `assets/device-studio/stackchan/source/diy-stack-chan-case.stl`
+- generated browser-preview path: `dist/device-studio/assets/stackchan/stackchan-preview.glb`
+- generated preview manifest path:
+  `dist/device-studio/assets/stackchan/stackchan-preview.manifest.json`
+- coordinate system: right-handed, millimeters, Y up, Z forward
+- semantic model parts for body, head, display, neck, and LEDs
+- pivot mappings for `head.yaw` and `head.pitch`
+- deterministic fallback primitives for the Three.js renderer when no STL/GLB is
+  available
+
+The current checkout does not include the DIY Stack-chan STL. Place the source
+asset under the canonical source path only after recording its source, license,
+and provenance. Large generated binaries should stay generated/ignored unless
+the repo intentionally decides to store them.
+
+Fallback geometry is simulator metadata. It is useful for previewing motion, but
+it is not CAD-accurate and must remain `unverified` until a real unit confirms
+the pivots and movement range.
+
+## Sprite Source Generation and Packing
+
+Sprite generation is optional and server-side. Device Studio tooling may call
+fal.ai models to create source artwork for expressions and visemes, but browser
+code must never receive `FAL_KEY`. The key belongs in runtime environment only:
+
+```bash
+export FAL_KEY="..."
+```
+
+The provider should support model IDs through configuration, starting with:
+
+- `fal-ai/nano-banana`
+- `fal-ai/nano-banana/edit`
+- `fal-ai/nano-banana-2`
+- `fal-ai/nano-banana-2/edit`
+- `fal-ai/gpt-image-1.5`
+- `fal-ai/gpt-image-1.5/edit`
+
+Generated art is just one possible input. Manually supplied PNGs and cached
+generated PNGs must flow through the same deterministic sprite packer. The
+packer produces a PNG atlas plus JSON manifest that records frame IDs,
+expression/viseme kind, source provenance, profile display size, safe area or
+round clipping metadata, atlas rectangles, and a content hash. Firmware exports
+must be reproducible without network calls.
+
+The headless CLI packs local PNG frames after TypeScript compilation:
+
+```bash
+npm run studio:sprites -- \
+  --profile waveshare.esp32-s3-touch-lcd-1.85 \
+  --out-atlas dist/device-studio-sprites/avatar.png \
+  --out-manifest dist/device-studio-sprites/avatar.json \
+  --frame expression:neutral:assets/device-studio/sprites/neutral.png \
+  --frame viseme:a:assets/device-studio/sprites/viseme-a.png
+```
+
+The initial PNG reader intentionally supports 8-bit RGBA, non-interlaced PNG
+sources. That keeps the packer dependency-free and deterministic while leaving
+room for broader image-format intake later.
+
 ## Movement, LEDs, and Display Channels
 
 Movement channels use semantic IDs rather than board pins. Examples:
