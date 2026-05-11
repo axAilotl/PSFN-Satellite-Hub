@@ -191,6 +191,12 @@ Run the TypeScript smoke test against the realtime hub:
 npm run smoke:ts
 ```
 
+Run the browser Device Studio scaffold locally:
+
+```bash
+npm run studio:dev
+```
+
 Send a typed turn through the PSFN channel seam with the text-only thin shell:
 
 ```bash
