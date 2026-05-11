@@ -13,7 +13,7 @@
           <h1>Device Studio</h1>
           <p id="profile-summary">Stack-chan bench profile / mock backend</p>
         </div>
-        <section class="status-strip" aria-label="Connection controls">
+        <section class="status-strip" aria-label="Studio profile">
           <label class="field">
             <span>Profile</span>
             <select id="profile-select" name="profile">
@@ -21,6 +21,16 @@
               <option value="waveshare-round">Waveshare round LCD</option>
             </select>
           </label>
+        </section>
+      </header>
+
+      <aside class="operation-panel" aria-labelledby="operations-heading">
+        <div class="panel-heading compact">
+          <h2 id="operations-heading">Operations</h2>
+          <span id="control-mode-label">Mock backend</span>
+        </div>
+
+        <section class="ops-block" aria-label="Connection state">
           <fieldset class="mode-toggle" aria-label="Backend mode">
             <legend>Backend</legend>
             <label>
@@ -36,8 +46,63 @@
             <span class="pulse" aria-hidden="true"></span>
             <span id="connection-label">Mock idle</span>
           </div>
+          <dl class="session-grid">
+            <div>
+              <dt>State</dt>
+              <dd id="connection-state-value">idle</dd>
+            </div>
+            <div>
+              <dt>Session</dt>
+              <dd id="session-value">not attached</dd>
+            </div>
+            <div>
+              <dt>Profile</dt>
+              <dd id="active-profile-value">stackchan.m5stack.cores3.reference</dd>
+            </div>
+            <div>
+              <dt>Log</dt>
+              <dd><span id="log-count-value">0</span> events</dd>
+            </div>
+          </dl>
         </section>
-      </header>
+
+        <section class="ops-block" aria-label="Send controls">
+          <label class="field">
+            <span>Hub URL</span>
+            <input id="hub-url" type="url" value="ws://127.0.0.1:8787/" spellcheck="false">
+          </label>
+          <div class="button-row">
+            <button id="connect-button" type="button">Connect</button>
+            <button id="ping-button" type="button" class="secondary" disabled>Ping</button>
+            <button id="interrupt-button" type="button" class="secondary" disabled>Interrupt</button>
+          </div>
+          <label class="field">
+            <span>Typed turn</span>
+            <textarea id="command-input" rows="4">look curious, then smile</textarea>
+          </label>
+          <button id="send-command-button" type="button" class="wide">Send typed turn</button>
+        </section>
+
+        <section class="ops-block" aria-label="Draft and import actions">
+          <div class="button-row">
+            <button id="draft-command-button" type="button" class="secondary">Draft</button>
+            <button id="import-behavior-button" type="button" class="secondary">Import</button>
+            <button id="export-behavior-button" type="button" class="secondary">Export</button>
+          </div>
+          <input id="import-behavior-file" class="visually-hidden" type="file" accept="application/json,.json">
+        </section>
+
+        <section class="ops-block log-block" aria-labelledby="event-log-heading">
+          <div class="panel-heading compact">
+            <h2 id="event-log-heading">Command/Event Log</h2>
+            <div class="button-row compact-buttons">
+              <button id="copy-log-button" type="button" class="secondary">Copy</button>
+              <button id="export-log-button" type="button" class="secondary">Export</button>
+            </div>
+          </div>
+          <ol class="event-log" id="event-log" aria-live="polite"></ol>
+        </section>
+      </aside>
 
       <section class="preview-panel" aria-labelledby="preview-heading">
         <div class="panel-heading">
@@ -75,26 +140,6 @@
         </div>
       </section>
 
-      <aside class="control-panel" aria-labelledby="controls-heading">
-        <div class="panel-heading compact">
-          <h2 id="controls-heading">Controls</h2>
-          <span id="control-mode-label">Mock backend</span>
-        </div>
-        <label class="field">
-          <span>Hub URL</span>
-          <input id="hub-url" type="url" value="ws://127.0.0.1:8787/" spellcheck="false">
-        </label>
-        <div class="button-row">
-          <button id="connect-button" type="button">Connect</button>
-          <button id="interrupt-button" type="button" class="secondary">Interrupt</button>
-        </div>
-        <label class="field">
-          <span>Command</span>
-          <textarea id="command-input" rows="4">look curious, then smile</textarea>
-        </label>
-        <button id="send-command-button" type="button" class="wide">Send command</button>
-      </aside>
-
       <section class="timeline-panel" aria-labelledby="timeline-heading">
         <div class="panel-heading">
           <div>
@@ -118,13 +163,6 @@
         </div>
       </section>
 
-      <aside class="event-log-panel" aria-labelledby="event-log-heading">
-        <div class="panel-heading compact">
-          <h2 id="event-log-heading">Command/Event Log</h2>
-          <button id="clear-log-button" type="button" class="secondary">Clear</button>
-        </div>
-        <ol class="event-log" id="event-log" aria-live="polite"></ol>
-      </aside>
     </main>
     <script type="module" src="main.js"></script>
   </body>

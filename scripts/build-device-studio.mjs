@@ -10,7 +10,6 @@ const outputDir = path.join(rootDir, "dist", "device-studio");
 const assets = [
   ["index.html", "index.html"],
   ["styles.css", "styles.css"],
-  [path.join(compiledDir, "main.js"), "main.js"],
 ];
 
 await fs.rm(outputDir, { recursive: true, force: true });
@@ -23,4 +22,15 @@ for (const [sourceName, outputName] of assets) {
   await fs.copyFile(sourcePath, path.join(outputDir, outputName));
 }
 
+await copyCompiledTree(compiledDir, outputDir);
+await copyCompiledTree(path.join(rootDir, "dist", "ts", "device-studio"), path.join(outputDir, "device-studio"));
+await copyCompiledTree(path.join(rootDir, "dist", "ts", "shared"), path.join(outputDir, "shared"));
+
 console.log(`Built Device Studio at ${path.relative(rootDir, outputDir)}`);
+
+async function copyCompiledTree(from, to) {
+  await fs.cp(from, to, {
+    recursive: true,
+    filter: (sourcePath) => !sourcePath.endsWith(".test.js"),
+  });
+}
