@@ -129,6 +129,31 @@ Errors:
 
 - `error-event`
 
+## Device Studio Embodiment MVP
+
+Device Studio does not need a new hub protocol message for the MVP. It connects
+as a simulated satellite with the normal `hello` payload, advertises the device
+capabilities it can preview, and drives local embodiment state from existing hub
+events:
+
+- `message` updates user and assistant subtitles.
+- `text` with `audio-init` / `audio-end` opens and closes local speaking state.
+- `audio` chunks can drive local viseme estimation when streamed audio is used.
+- `assistant.interrupted` and `action: interrupt` stop local behavior playback.
+- `user.text`, `turn.start`, `audio`, `turn.end`, and `interrupt` cover the
+  outbound user and lifecycle path.
+
+This keeps the production hub and existing Pi-class clients unchanged. Studio
+behavior selection, expression, viseme, servo preview, LEDs, and display state
+remain local simulator state unless a later server-driven embodiment feature
+needs to cross the websocket boundary.
+
+If that later feature is added, it should use explicit optional messages instead
+of JSON encoded inside `message.data.content` or `text.data`. Those messages
+must be capability-gated through `hello`, versioned, typed in
+`src/ts/shared/protocol.ts`, documented here, and covered by focused protocol
+tests.
+
 ## Streaming Model
 
 The intended client behavior is:
