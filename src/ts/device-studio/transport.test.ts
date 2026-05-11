@@ -101,6 +101,62 @@ test("hub message parser accepts known protocol messages and rejects malformed p
   }
 });
 
+test("embodiment MVP stays on existing realtime protocol messages", async () => {
+  const candidateExtensionTypes = [
+    "embodiment.state",
+    "behavior.command",
+    "device.input",
+  ] as const;
+
+  for (const type of candidateExtensionTypes) {
+    const parsed = parseHubMessage({ type });
+    assert.equal(parsed.ok, false);
+    if (!parsed.ok) {
+      assert.equal(parsed.error, `Unsupported hub message type: ${type}`);
+    }
+  }
+
+  const client = new DeviceStudioHubClient({
+    mode: "mock",
+    profile: fixtureMotionDisplayProfile,
+    mock: {
+      assistantText: "Existing lifecycle drove the preview.",
+      assistantLiveDeltas: ["Existing lifecycle ", "drove the preview."],
+    },
+    clock: fixedClock("2026-05-11T16:02:00.000Z"),
+  });
+  const lifecycle: DeviceStudioLifecycleEvent[] = [];
+  client.on("lifecycle", (event) => lifecycle.push(event));
+
+  await client.connect();
+  const assistantFinal = waitForEvent(
+    client,
+    "message",
+    (event) => event.role === "assistant" && event.final,
+  );
+  client.sendUserText("preview a happy greeting", { interrupt: false });
+  assert.equal((await assistantFinal).content, "Existing lifecycle drove the preview.");
+
+  const wireMessageTypes = client.getLog()
+    .filter((entry) => entry.direction === "in" || entry.direction === "out")
+    .map((entry) => entry.messageType)
+    .filter((type): type is string => typeof type === "string");
+  assert.equal(wireMessageTypes.includes("hello"), true);
+  assert.equal(wireMessageTypes.includes("user.text"), true);
+  assert.equal(wireMessageTypes.includes("message"), true);
+  assert.equal(wireMessageTypes.includes("text"), true);
+  assert.equal(
+    wireMessageTypes.some((type) => candidateExtensionTypes.includes(
+      type as (typeof candidateExtensionTypes)[number],
+    )),
+    false,
+  );
+
+  assert.equal(lifecycle.some((event) => event.name === "audio.start"), true);
+  assert.equal(lifecycle.some((event) => event.name === "audio.end"), true);
+  assert.equal(client.snapshot().session.assistantSpeaking, false);
+});
+
 test("live transport sends hello and typed commands over websocket", async () => {
   const server = new WebSocketServer({ port: 0 });
   const received: ClientToHubMessage[] = [];

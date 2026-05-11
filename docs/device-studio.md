@@ -480,9 +480,16 @@ host-generated, official-confirmed, imported-unverified, and hardware-verified.
 
 ## Optional Protocol Extensions
 
-The MVP should use the existing realtime websocket contract and local simulator
-state. If later implementation needs server-driven embodied behavior, add
-explicit messages rather than encoding JSON inside `text.data` or
+For the MVP, no new hub protocol message is required. Device Studio can connect
+as a normal realtime satellite, advertise previewable output capabilities in
+`hello`, and reduce existing `message`, `text` audio lifecycle, `audio`,
+`assistant.interrupted`, `action`, `user.text`, and `interrupt` events into local
+simulator state. Expression, viseme, movement, LED, and display playback are
+owned by the studio behavior engine until a hub feature explicitly needs to
+command or observe those states across the websocket.
+
+If later implementation needs server-driven embodied behavior, add explicit
+messages rather than encoding JSON inside `text.data` or
 `message.data.content`.
 
 Extension rules:
