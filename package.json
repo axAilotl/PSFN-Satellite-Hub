@@ -9,6 +9,8 @@
     "pi:ts": "tsx src/ts/pi-client/main.ts",
     "smoke:ts": "node scripts/smoke-ts-hub.mjs",
     "shell:psfn": "node scripts/psfn-thin-shell.mjs",
+    "studio:build": "npm run build:ts && node scripts/build-device-studio.mjs",
+    "studio:dev": "npm run studio:build && node scripts/serve-device-studio.mjs",
     "test:ts": "npm run build:ts && node --test dist/ts/**/*.test.js",
     "check:ts": "tsc -p tsconfig.json --noEmit"
   },
