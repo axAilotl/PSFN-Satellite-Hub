@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Device Studio</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="studio-shell" aria-label="Device Studio">
+      <header class="topbar">
+        <div class="title-block">
+          <h1>Device Studio</h1>
+          <p id="profile-summary">Stack-chan bench profile / mock backend</p>
+        </div>
+        <section class="status-strip" aria-label="Connection controls">
+          <label class="field">
+            <span>Profile</span>
+            <select id="profile-select" name="profile">
+              <option value="stack-chan">Stack-chan bench</option>
+              <option value="waveshare-round">Waveshare round LCD</option>
+            </select>
+          </label>
+          <fieldset class="mode-toggle" aria-label="Backend mode">
+            <legend>Backend</legend>
+            <label>
+              <input type="radio" name="backend-mode" value="mock" checked>
+              <span>Mock</span>
+            </label>
+            <label>
+              <input type="radio" name="backend-mode" value="live">
+              <span>Live</span>
+            </label>
+          </fieldset>
+          <div class="connection-badge" id="connection-badge" data-mode="mock">
+            <span class="pulse" aria-hidden="true"></span>
+            <span id="connection-label">Mock idle</span>
+          </div>
+        </section>
+      </header>
+
+      <section class="preview-panel" aria-labelledby="preview-heading">
+        <div class="panel-heading">
+          <div>
+            <h2 id="preview-heading">Preview</h2>
+            <p id="preview-caption">Screen, face, motion, and status preview surface</p>
+          </div>
+          <div class="preview-meta" id="preview-meta">320 x 240 / pan + tilt</div>
+        </div>
+        <div class="preview-stage" id="preview-stage">
+          <div class="device-stand" aria-hidden="true">
+            <div class="servo-neck"></div>
+            <div class="device-face" id="device-face">
+              <div class="eye left-eye"></div>
+              <div class="eye right-eye"></div>
+              <div class="mouth" id="device-mouth"></div>
+            </div>
+          </div>
+          <aside class="preview-state" aria-label="Preview state">
+            <dl>
+              <div>
+                <dt>Expression</dt>
+                <dd id="expression-value">Neutral</dd>
+              </div>
+              <div>
+                <dt>Viseme</dt>
+                <dd id="viseme-value">Rest</dd>
+              </div>
+              <div>
+                <dt>Motion</dt>
+                <dd id="motion-value">Pan 0 / Tilt 0</dd>
+              </div>
+            </dl>
+          </aside>
+        </div>
+      </section>
+
+      <aside class="control-panel" aria-labelledby="controls-heading">
+        <div class="panel-heading compact">
+          <h2 id="controls-heading">Controls</h2>
+          <span id="control-mode-label">Mock backend</span>
+        </div>
+        <label class="field">
+          <span>Hub URL</span>
+          <input id="hub-url" type="url" value="ws://127.0.0.1:8787/" spellcheck="false">
+        </label>
+        <div class="button-row">
+          <button id="connect-button" type="button">Connect</button>
+          <button id="interrupt-button" type="button" class="secondary">Interrupt</button>
+        </div>
+        <label class="field">
+          <span>Command</span>
+          <textarea id="command-input" rows="4">look curious, then smile</textarea>
+        </label>
+        <button id="send-command-button" type="button" class="wide">Send command</button>
+      </aside>
+
+      <section class="timeline-panel" aria-labelledby="timeline-heading">
+        <div class="panel-heading">
+          <div>
+            <h2 id="timeline-heading">Behavior Timeline</h2>
+            <p>Library, frame playback, and provenance state</p>
+          </div>
+          <div class="button-row">
+            <button id="play-button" type="button">Play</button>
+            <button id="stop-button" type="button" class="secondary">Stop</button>
+          </div>
+        </div>
+        <div class="behavior-grid" id="behavior-list" aria-label="Behavior library"></div>
+        <div class="timeline-track" aria-label="Timeline">
+          <div class="time-ruler">
+            <span>0 ms</span>
+            <span>500 ms</span>
+            <span>1000 ms</span>
+            <span>1500 ms</span>
+          </div>
+          <div class="frame-lane" id="frame-lane"></div>
+        </div>
+      </section>
+
+      <aside class="event-log-panel" aria-labelledby="event-log-heading">
+        <div class="panel-heading compact">
+          <h2 id="event-log-heading">Command/Event Log</h2>
+          <button id="clear-log-button" type="button" class="secondary">Clear</button>
+        </div>
+        <ol class="event-log" id="event-log" aria-live="polite"></ol>
+      </aside>
+    </main>
+    <script type="module" src="main.js"></script>
+  </body>
+</html>
