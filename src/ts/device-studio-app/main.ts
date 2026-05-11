@@ -10,10 +10,10 @@ import {
   type BehaviorPlayback,
   type NormalizedBehaviorRenderState,
 } from "../device-studio/behavior.js";
-import type { BehaviorTimeline, DeviceProfile, HardwareVerification } from "../device-studio/model.js";
+import type { BehaviorTimeline, HardwareVerification } from "../device-studio/model.js";
 import {
-  stackChanProfile,
-  waveshareEsp32S3RoundTouchProfile,
+  concreteDeviceProfiles,
+  getConcreteDeviceProfile,
   type ConcreteDeviceProfile,
 } from "../device-studio/profiles.js";
 import {
@@ -24,56 +24,44 @@ import {
   type DeviceStudioTransportUnsubscribe,
 } from "../device-studio/transport.js";
 import {
+  DisplayPreview,
+  formatIgnoredChannels,
+  formatProfilePreviewMeta,
+  type DisplayTouchLogDetail,
+} from "./display-preview.js";
+import {
   DeviceStudioAppEventLog,
   formatDeviceStudioEventForClipboard,
   type DeviceStudioAppEventInput,
 } from "./event-log.js";
 
-type ProfileId = "stack-chan" | "waveshare-round";
-
-interface DeviceProfileOption {
-  id: ProfileId;
-  label: string;
-  summary: string;
-  previewMeta: string;
-  caption: string;
-  previewKey: string;
-  profile: ConcreteDeviceProfile;
+interface StudioState {
+  profileId: string;
+  backendMode: DeviceStudioTransportMode;
+  selectedBehaviorId: string;
+  elapsedMs: number;
 }
 
-const profiles: Record<ProfileId, DeviceProfileOption> = {
-  "stack-chan": {
-    id: "stack-chan",
-    label: "Stack-chan bench",
-    summary: "M5Stack Stack-chan reference profile",
-    previewMeta: "320 x 240 / pan + tilt",
-    caption: "Screen, face, motion, and status preview surface",
-    previewKey: "stack-chan",
-    profile: stackChanProfile,
-  },
-  "waveshare-round": {
-    id: "waveshare-round",
-    label: "Waveshare round LCD",
-    summary: "Waveshare ESP32-S3 round LCD profile",
-    previewMeta: "360 x 360 / touch",
-    caption: "Round LCD expression and touch preview surface",
-    previewKey: "waveshare-round",
-    profile: waveshareEsp32S3RoundTouchProfile,
-  },
-};
-
-const state = {
-  profileId: "stack-chan" as ProfileId,
-  backendMode: "mock" as DeviceStudioTransportMode,
-  selectedBehaviorId: "behavior.neutral",
-};
-
 let behaviorLibrary: BehaviorLibrary = createFixtureBehaviorLibrary();
+const firstProfile = requireFirst(concreteDeviceProfiles, "Device Studio requires at least one profile");
+const firstBehavior = requireFirst(
+  behaviorLibrary.list({ profile: firstProfile, includeIncompatible: true }),
+  "Device Studio requires at least one behavior",
+);
+
+const state: StudioState = {
+  profileId: firstProfile.id,
+  backendMode: "mock",
+  selectedBehaviorId: firstBehavior.id,
+  elapsedMs: 0,
+};
+
 let hubClient: DeviceStudioHubClient | null = null;
 let hubClientConfigKey = "";
 let hubUnsubscribes: DeviceStudioTransportUnsubscribe[] = [];
 let activePlayback: BehaviorPlayback | null = null;
-
+let animationFrameId: number | undefined;
+let playbackStartedAt = 0;
 const operationalLog = new DeviceStudioAppEventLog();
 
 function requireElement<T extends HTMLElement>(id: string, type: { new(): T }): T {
@@ -82,6 +70,14 @@ function requireElement<T extends HTMLElement>(id: string, type: { new(): T }): 
     throw new Error(`Missing #${id}`);
   }
   return element;
+}
+
+function requireFirst<T>(values: readonly T[], message: string): T {
+  const first = values[0];
+  if (!first) {
+    throw new Error(message);
+  }
+  return first;
 }
 
 const profileSelect = requireElement("profile-select", HTMLSelectElement);
@@ -96,10 +92,8 @@ const logCountValue = requireElement("log-count-value", HTMLElement);
 const previewCaption = requireElement("preview-caption", HTMLParagraphElement);
 const previewMeta = requireElement("preview-meta", HTMLDivElement);
 const previewStage = requireElement("preview-stage", HTMLDivElement);
-const expressionValue = requireElement("expression-value", HTMLElement);
-const visemeValue = requireElement("viseme-value", HTMLElement);
-const motionValue = requireElement("motion-value", HTMLElement);
 const behaviorList = requireElement("behavior-list", HTMLDivElement);
+const timeRuler = requireElement("time-ruler", HTMLDivElement);
 const frameLane = requireElement("frame-lane", HTMLDivElement);
 const eventLog = requireElement("event-log", HTMLOListElement);
 const commandInput = requireElement("command-input", HTMLTextAreaElement);
@@ -117,35 +111,45 @@ const stopButton = requireElement("stop-button", HTMLButtonElement);
 const copyLogButton = requireElement("copy-log-button", HTMLButtonElement);
 const exportLogButton = requireElement("export-log-button", HTMLButtonElement);
 
-function selectedProfileOption(): DeviceProfileOption {
-  return profiles[state.profileId];
+const displayPreview = new DisplayPreview(previewStage, {
+  onTouch: (detail) => recordDisplayTouch(detail),
+});
+
+function selectedProfile(): ConcreteDeviceProfile {
+  const profile = getConcreteDeviceProfile(state.profileId);
+  if (!profile) {
+    throw new Error(`Unknown profile ${state.profileId}`);
+  }
+  return profile;
 }
 
-function selectedProfile(): DeviceProfile {
-  return selectedProfileOption().profile;
+function behaviorEntries(profile = selectedProfile()): BehaviorLibraryEntry[] {
+  return behaviorLibrary.list({ profile, includeIncompatible: true });
 }
 
-function behaviorEntries(): BehaviorLibraryEntry[] {
-  return behaviorLibrary.list({ profile: selectedProfile(), includeIncompatible: true });
+function ensureSelectedBehavior(profile = selectedProfile()): void {
+  const entries = behaviorEntries(profile);
+  if (entries.some((entry) => entry.id === state.selectedBehaviorId)) {
+    return;
+  }
+  state.selectedBehaviorId = requireFirst(entries, "No behaviors available for selected profile").id;
+  state.elapsedMs = 0;
 }
 
 function selectedBehaviorEntry(): BehaviorLibraryEntry {
-  const entries = behaviorEntries();
-  const selected = entries.find((entry) => entry.id === state.selectedBehaviorId) ?? entries[0];
-  if (!selected) {
-    throw new Error("Behavior library is empty");
+  ensureSelectedBehavior();
+  const entry = behaviorEntries().find((candidate) => candidate.id === state.selectedBehaviorId);
+  if (!entry) {
+    throw new Error(`Unknown behavior ${state.selectedBehaviorId}`);
   }
-  if (selected.id !== state.selectedBehaviorId) {
-    state.selectedBehaviorId = selected.id;
-  }
-  return selected;
+  return entry;
 }
 
 function selectedBehaviorTimeline(): BehaviorTimeline {
   return behaviorLibrary.require(selectedBehaviorEntry().id);
 }
 
-function selectedRenderState(elapsedMs = 0): NormalizedBehaviorRenderState {
+function sampleSelectedBehavior(elapsedMs = state.elapsedMs): NormalizedBehaviorRenderState {
   return sampleBehaviorRenderState(selectedBehaviorTimeline(), elapsedMs, { profile: selectedProfile() });
 }
 
@@ -180,8 +184,18 @@ function recordBehaviorEvent(event: BehaviorEvent): void {
   renderEventLog();
 }
 
+function recordDisplayTouch(detail: DisplayTouchLogDetail): void {
+  recordEvent({
+    ...activeSessionContext(),
+    source: "user",
+    kind: detail.type,
+    summary: `${detail.gesture} ${detail.pixel.x},${detail.pixel.y}`,
+    payload: detail,
+  });
+}
+
 function recordHardwareVerification(subject: "profile" | "behavior"): void {
-  const profile = selectedProfileOption().profile;
+  const profile = selectedProfile();
   const entry = selectedBehaviorEntry();
   const payload = subject === "profile"
     ? {
@@ -214,20 +228,30 @@ function verificationPayload(id: string, name: string, verification: HardwareVer
   };
 }
 
+function renderProfileOptions(): void {
+  profileSelect.replaceChildren(...concreteDeviceProfiles.map((profile) => {
+    const option = document.createElement("option");
+    option.value = profile.id;
+    option.textContent = profile.name;
+    return option;
+  }));
+}
+
 function renderProfile(): void {
-  const option = selectedProfileOption();
-  profileSummary.textContent = `${option.summary} / ${state.backendMode} backend`;
-  previewCaption.textContent = option.caption;
-  previewMeta.textContent = option.previewMeta;
-  previewStage.dataset.profile = option.previewKey;
-  activeProfileValue.textContent = option.profile.id;
+  const profile = selectedProfile();
+  profileSelect.value = profile.id;
+  profileSummary.textContent = `${profile.name} / ${state.backendMode} backend`;
+  previewCaption.textContent = profile.description;
+  previewMeta.textContent = formatProfilePreviewMeta(profile);
+  activeProfileValue.textContent = profile.id;
+  displayPreview.setProfile(profile);
 }
 
 function renderMode(): void {
   const snapshot = activeSnapshot();
   const connectionState: DeviceStudioConnectionState = snapshot?.state ?? "idle";
   const ready = snapshot?.ready ?? false;
-  const connected = connectionState === "connected" || connectionState === "ready";
+  const connected = isActiveConnectionState(connectionState);
   const modeLabel = state.backendMode === "mock" ? "Mock" : "Live";
 
   connectionBadge.dataset.mode = state.backendMode;
@@ -242,28 +266,32 @@ function renderMode(): void {
 }
 
 function renderBehavior(): void {
-  const renderState = selectedRenderState();
-  applyRenderStateToPreview(renderState);
+  applyRenderStateToPreview(sampleSelectedBehavior());
   renderFrameLane();
 }
 
 function applyRenderStateToPreview(renderState: NormalizedBehaviorRenderState): void {
-  expressionValue.textContent = renderState.expression?.id ?? "None";
-  visemeValue.textContent = renderState.viseme?.id ?? "Rest";
-  motionValue.textContent = formatMotion(renderState);
-  previewStage.dataset.expression = renderState.expression?.id ?? "neutral";
+  state.elapsedMs = renderState.elapsedMs;
   previewStage.dataset.hardwareVerified = String(renderState.hardwareVerified);
+  displayPreview.render(renderState);
 }
 
 function renderFrameLane(): void {
   const timeline = selectedBehaviorTimeline();
-  const durationMs = Math.max(timeline.durationMs ?? 0, ...timeline.frames.map((frame) => frame.atMs), 1);
+  const renderState = sampleSelectedBehavior();
+  const durationMs = Math.max(renderState.durationMs, timeline.durationMs ?? 0, 1);
+  timeRuler.replaceChildren(...[0, durationMs / 3, (durationMs * 2) / 3, durationMs].map((time) => {
+    const marker = document.createElement("span");
+    marker.textContent = `${Math.round(time)} ms`;
+    return marker;
+  }));
   frameLane.replaceChildren(...timeline.frames.map((frame, index) => {
     const marker = document.createElement("button");
     marker.type = "button";
     marker.className = "frame-marker";
     marker.style.left = `${Math.min(96, Math.max(4, (frame.atMs / durationMs) * 100))}%`;
     marker.textContent = String(index + 1);
+    marker.dataset.active = String(renderState.activeFrame?.index === index);
     marker.setAttribute("aria-label", `Frame ${index + 1} at ${frame.atMs} milliseconds`);
     marker.addEventListener("click", () => applyBehaviorFrame(frame.atMs));
     return marker;
@@ -276,23 +304,35 @@ function renderBehaviorList(): void {
     behaviorList.replaceChildren();
     return;
   }
-  selectedBehaviorEntry();
+  ensureSelectedBehavior();
   behaviorList.replaceChildren(...entries.map((entry) => {
     const renderState = sampleBehaviorRenderState(behaviorLibrary.require(entry.id), 0, { profile: selectedProfile() });
     const button = document.createElement("button");
     button.type = "button";
     button.className = "behavior-card";
     button.dataset.selected = String(entry.id === state.selectedBehaviorId);
+    button.dataset.compatible = String(entry.compatible);
     const label = document.createElement("strong");
     label.textContent = entry.name;
     const stateLine = document.createElement("span");
-    stateLine.textContent = `${renderState.expression?.id ?? "none"} / ${renderState.viseme?.id ?? "rest"}`;
+    stateLine.textContent = [
+      renderState.expression?.id ?? "none",
+      renderState.viseme?.id ?? "rest",
+      entry.supportedChannels.join(", ") || "no preview channels",
+    ].join(" / ");
     const provenance = document.createElement("small");
-    provenance.textContent = `${entry.provenanceSource}${entry.hardwareVerified ? " / hardware verified" : " / unverified"}`;
+    provenance.textContent = `${entry.provenanceSource} / ${entry.hardwareVerificationStatus}`;
     button.append(label, stateLine, provenance);
+    if (entry.ignoredChannels.length > 0) {
+      const ignored = document.createElement("small");
+      ignored.className = "ignored-channel-note";
+      ignored.textContent = `Drops ${formatIgnoredChannels(entry.ignoredChannels)}`;
+      button.append(ignored);
+    }
     button.addEventListener("click", () => {
       stopActivePlayback("behavior changed");
       state.selectedBehaviorId = entry.id;
+      state.elapsedMs = 0;
       renderBehaviorList();
       renderBehavior();
       recordEvent({
@@ -372,6 +412,7 @@ function renderEventLog(): void {
 }
 
 function render(): void {
+  ensureSelectedBehavior();
   renderProfile();
   renderMode();
   renderBehaviorList();
@@ -380,11 +421,9 @@ function render(): void {
 }
 
 function ensureHubClient(): DeviceStudioHubClient {
-  const snapshot = hubClient?.snapshot();
-  if (hubClient && snapshot?.mode === state.backendMode && hubClientConfigKey === desiredHubClientConfigKey()) {
+  if (hubClient && hubClient.snapshot().mode === state.backendMode && hubClientConfigKey === desiredHubClientConfigKey()) {
     return hubClient;
   }
-
   replaceHubClient();
   if (!hubClient) {
     throw new Error("Device Studio hub client was not initialized");
@@ -409,7 +448,7 @@ function replaceHubClient(): void {
     url: hubUrl.value,
     profile,
     mock: {
-      assistantText: `Mock ${selectedProfileOption().label} response from Device Studio.`,
+      assistantText: `Mock ${profile.name} response from Device Studio.`,
       assistantLiveDeltas: ["Mock transport ", "accepted the typed turn."],
     },
   });
@@ -424,6 +463,17 @@ function replaceHubClient(): void {
       });
       renderMode();
       renderEventLog();
+    }),
+    hubClient.on("message", (event) => {
+      if (event.final && event.role === "assistant") {
+        stopActivePlayback("assistant final", false);
+      }
+    }),
+    hubClient.on("lifecycle", (event) => {
+      if (event.name === "assistant.interrupted" || event.name === "action.interrupt") {
+        stopActivePlayback("transport interrupt");
+      }
+      renderMode();
     }),
     hubClient.on("state", () => renderMode()),
     hubClient.on("error", () => renderMode()),
@@ -502,12 +552,16 @@ async function sendTypedTurn(): Promise<void> {
   }
 }
 
-function stopActivePlayback(reason: string): void {
-  if (!activePlayback) {
-    return;
+function stopActivePlayback(reason: string, emit = true): void {
+  if (animationFrameId !== undefined) {
+    cancelAnimationFrame(animationFrameId);
+    animationFrameId = undefined;
   }
-  activePlayback.stop(reason);
+  const playback = activePlayback;
   activePlayback = null;
+  if (playback && emit) {
+    applyRenderStateToPreview(playback.stop(reason, state.elapsedMs));
+  }
 }
 
 function createSelectedPlayback(): BehaviorPlayback {
@@ -521,34 +575,44 @@ function createSelectedPlayback(): BehaviorPlayback {
 function playSelectedBehavior(): void {
   stopActivePlayback("restarted");
   activePlayback = createSelectedPlayback();
-  applyRenderStateToPreview(activePlayback.start(0));
+  const started = activePlayback.start(0);
+  playbackStartedAt = performance.now() - started.elapsedMs;
+  applyRenderStateToPreview(started);
+  schedulePlaybackTick();
+}
+
+function schedulePlaybackTick(): void {
+  animationFrameId = requestAnimationFrame((timestamp) => {
+    const playback = activePlayback;
+    if (!playback) {
+      animationFrameId = undefined;
+      return;
+    }
+    const renderState = playback.sample(timestamp - playbackStartedAt);
+    applyRenderStateToPreview(renderState);
+    renderFrameLane();
+    if (renderState.complete) {
+      stopActivePlayback("complete");
+      return;
+    }
+    schedulePlaybackTick();
+  });
 }
 
 function applyBehaviorFrame(elapsedMs: number): void {
   if (!activePlayback) {
     activePlayback = createSelectedPlayback();
-    activePlayback.start(0);
+    applyRenderStateToPreview(activePlayback.start(0));
   }
   applyRenderStateToPreview(activePlayback.sample(elapsedMs));
-}
-
-function formatMotion(renderState: NormalizedBehaviorRenderState): string {
-  const joints = Object.entries(renderState.joints);
-  if (joints.length > 0) {
-    return joints.map(([id, state]) => `${id} ${state.value}`).join(" / ");
-  }
-  const ignoredJoint = renderState.ignoredChannels.find((channel) => channel.channel === "joints");
-  if (ignoredJoint) {
-    return ignoredJoint.targetId ? `Ignored ${ignoredJoint.targetId}` : "Motion ignored";
-  }
-  return "No active motion";
+  renderFrameLane();
 }
 
 function createDraftCommand(): void {
   const entry = selectedBehaviorEntry();
-  const option = selectedProfileOption();
+  const profile = selectedProfile();
   const channels = entry.supportedChannels.join(", ");
-  commandInput.value = `Draft a ${entry.name} turn for ${option.label}. Use supported channels: ${channels}. Keep motion hardware-safe and report any unverified output before applying it.`;
+  commandInput.value = `Draft a ${entry.name} turn for ${profile.name}. Use supported channels: ${channels}. Keep motion hardware-safe and report any unverified output before applying it.`;
   recordEvent({
     ...activeSessionContext(),
     source: "user",
@@ -556,7 +620,7 @@ function createDraftCommand(): void {
     summary: entry.name,
     payload: {
       behaviorId: entry.id,
-      profileId: option.profile.id,
+      profileId: profile.id,
       supportedChannels: entry.supportedChannels,
       ignoredChannels: entry.ignoredChannels,
     },
@@ -581,6 +645,7 @@ async function importBehaviorFileSelection(): Promise<void> {
     if (first) {
       state.selectedBehaviorId = first.id;
     }
+    state.elapsedMs = 0;
     stopActivePlayback("imported library");
     renderBehaviorList();
     renderBehavior();
@@ -619,39 +684,45 @@ async function copyEventLog(): Promise<void> {
 }
 
 function exportEventLog(): void {
+  downloadText("device-studio-event-log.json", operationalLog.toJson(), "application/json");
   recordEvent({
     ...activeSessionContext(),
     source: "import/export",
     kind: "event-log.export",
     summary: `${operationalLog.entries.length} entries`,
   });
-  downloadText("device-studio-event-log.json", operationalLog.toJson({ space: 2 }), "application/json");
 }
 
 function downloadText(filename: string, text: string, type: string): void {
   const blob = new Blob([text], { type });
-  const url = URL.createObjectURL(blob);
+  const href = URL.createObjectURL(blob);
   const link = document.createElement("a");
-  link.href = url;
+  link.href = href;
   link.download = filename;
+  document.body.append(link);
   link.click();
-  URL.revokeObjectURL(url);
+  link.remove();
+  URL.revokeObjectURL(href);
 }
+
+renderProfileOptions();
 
 profileSelect.addEventListener("change", () => {
   stopActivePlayback("profile changed");
-  state.profileId = profileSelect.value as ProfileId;
+  state.profileId = profileSelect.value;
+  state.elapsedMs = 0;
   replaceHubClient();
-  renderProfile();
-  renderBehaviorList();
-  renderBehavior();
-  renderMode();
+  ensureSelectedBehavior();
+  render();
   recordEvent({
     ...activeSessionContext(),
     source: "user",
     kind: "profile.select",
-    summary: selectedProfileOption().label,
-    payload: selectedProfile(),
+    summary: selectedProfile().name,
+    payload: {
+      profileId: state.profileId,
+      touch: selectedProfile().touch,
+    },
   });
   recordHardwareVerification("profile");
 });
@@ -663,77 +734,54 @@ document.querySelectorAll<HTMLInputElement>('input[name="backend-mode"]').forEac
     }
     state.backendMode = input.value as DeviceStudioTransportMode;
     replaceHubClient();
-    renderProfile();
-    renderMode();
+    render();
     recordEvent({
       ...activeSessionContext(),
       source: "user",
       kind: "backend.mode",
       summary: state.backendMode,
-      payload: { mode: state.backendMode },
     });
   });
 });
 
-hubUrl.addEventListener("change", () => {
-  if (state.backendMode === "live") {
-    replaceHubClient();
-    renderMode();
-  }
-});
+hubUrl.addEventListener("change", () => replaceHubClient());
 
 connectButton.addEventListener("click", () => {
   void toggleConnection();
 });
 
 pingButton.addEventListener("click", () => {
-  try {
-    ensureHubClient().ping();
-  } catch (error) {
-    recordEvent({
-      ...activeSessionContext(),
-      source: "user",
-      kind: "ping.failed",
-      summary: error instanceof Error ? error.message : "Ping failed",
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
+  ensureHubClient().ping();
 });
 
 interruptButton.addEventListener("click", () => {
-  try {
-    ensureHubClient().interrupt();
-  } catch (error) {
-    recordEvent({
-      ...activeSessionContext(),
-      source: "user",
-      kind: "interrupt.failed",
-      summary: error instanceof Error ? error.message : "Interrupt failed",
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
+  stopActivePlayback("interrupt");
+  ensureHubClient().interrupt();
 });
 
 sendCommandButton.addEventListener("click", () => {
   void sendTypedTurn();
 });
 
-draftCommandButton.addEventListener("click", createDraftCommand);
+draftCommandButton.addEventListener("click", () => createDraftCommand());
+
 importBehaviorButton.addEventListener("click", () => importBehaviorFile.click());
+
 importBehaviorFile.addEventListener("change", () => {
   void importBehaviorFileSelection();
 });
-exportBehaviorButton.addEventListener("click", exportSelectedBehavior);
 
-playButton.addEventListener("click", playSelectedBehavior);
-stopButton.addEventListener("click", () => {
-  stopActivePlayback("manual");
-});
+exportBehaviorButton.addEventListener("click", () => exportSelectedBehavior());
+
+playButton.addEventListener("click", () => playSelectedBehavior());
+
+stopButton.addEventListener("click", () => stopActivePlayback("user stop"));
 
 copyLogButton.addEventListener("click", () => {
   void copyEventLog();
 });
-exportLogButton.addEventListener("click", exportEventLog);
+
+exportLogButton.addEventListener("click", () => exportEventLog());
 
 replaceHubClient();
 render();
@@ -741,12 +789,9 @@ recordEvent({
   ...activeSessionContext(),
   source: "transport",
   kind: "studio.ready",
-  summary: "operational panel initialized",
+  summary: "Device Studio initialized",
   payload: {
-    mode: state.backendMode,
-    profileId: selectedProfile().id,
+    profileId: state.profileId,
     behaviorId: state.selectedBehaviorId,
   },
 });
-recordHardwareVerification("profile");
-recordHardwareVerification("behavior");
