@@ -34,6 +34,16 @@ import {
   formatDeviceStudioEventForClipboard,
   type DeviceStudioAppEventInput,
 } from "./event-log.js";
+import {
+  StackChanPreview,
+  type StackChanPreviewModel,
+} from "./stackchan-preview.js";
+
+declare global {
+  interface Window {
+    __deviceStudioPreviewSnapshot?: () => StackChanPreviewModel | undefined;
+  }
+}
 
 interface StudioState {
   profileId: string;
@@ -62,6 +72,7 @@ let hubUnsubscribes: DeviceStudioTransportUnsubscribe[] = [];
 let activePlayback: BehaviorPlayback | null = null;
 let animationFrameId: number | undefined;
 let playbackStartedAt = 0;
+let lastStackChanModel: StackChanPreviewModel | undefined;
 const operationalLog = new DeviceStudioAppEventLog();
 
 function requireElement<T extends HTMLElement>(id: string, type: { new(): T }): T {
@@ -92,6 +103,8 @@ const logCountValue = requireElement("log-count-value", HTMLElement);
 const previewCaption = requireElement("preview-caption", HTMLParagraphElement);
 const previewMeta = requireElement("preview-meta", HTMLDivElement);
 const previewStage = requireElement("preview-stage", HTMLDivElement);
+const displayPreviewRoot = requireElement("display-preview-root", HTMLDivElement);
+const stackChanPreviewRoot = requireElement("stackchan-preview-root", HTMLDivElement);
 const behaviorList = requireElement("behavior-list", HTMLDivElement);
 const timeRuler = requireElement("time-ruler", HTMLDivElement);
 const frameLane = requireElement("frame-lane", HTMLDivElement);
@@ -111,9 +124,11 @@ const stopButton = requireElement("stop-button", HTMLButtonElement);
 const copyLogButton = requireElement("copy-log-button", HTMLButtonElement);
 const exportLogButton = requireElement("export-log-button", HTMLButtonElement);
 
-const displayPreview = new DisplayPreview(previewStage, {
+const displayPreview = new DisplayPreview(displayPreviewRoot, {
   onTouch: (detail) => recordDisplayTouch(detail),
 });
+const stackChanPreview = new StackChanPreview(stackChanPreviewRoot);
+window.__deviceStudioPreviewSnapshot = () => lastStackChanModel;
 
 function selectedProfile(): ConcreteDeviceProfile {
   const profile = getConcreteDeviceProfile(state.profileId);
@@ -244,6 +259,8 @@ function renderProfile(): void {
   previewCaption.textContent = profile.description;
   previewMeta.textContent = formatProfilePreviewMeta(profile);
   activeProfileValue.textContent = profile.id;
+  previewStage.dataset.profile = profile.family;
+  previewStage.dataset.hardware = profile.hardwareVerification.status;
   displayPreview.setProfile(profile);
 }
 
@@ -274,6 +291,7 @@ function applyRenderStateToPreview(renderState: NormalizedBehaviorRenderState): 
   state.elapsedMs = renderState.elapsedMs;
   previewStage.dataset.hardwareVerified = String(renderState.hardwareVerified);
   displayPreview.render(renderState);
+  lastStackChanModel = stackChanPreview.update(selectedProfile(), renderState);
 }
 
 function renderFrameLane(): void {
