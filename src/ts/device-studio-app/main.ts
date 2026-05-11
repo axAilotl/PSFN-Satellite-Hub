@@ -32,6 +32,7 @@ import {
 import {
   DeviceStudioAppEventLog,
   formatDeviceStudioEventForClipboard,
+  type DeviceStudioAppEventLogEntry,
   type DeviceStudioAppEventInput,
 } from "./event-log.js";
 import {
@@ -92,7 +93,6 @@ function requireFirst<T>(values: readonly T[], message: string): T {
 }
 
 const profileSelect = requireElement("profile-select", HTMLSelectElement);
-const profileSummary = requireElement("profile-summary", HTMLParagraphElement);
 const connectionBadge = requireElement("connection-badge", HTMLDivElement);
 const connectionLabel = requireElement("connection-label", HTMLSpanElement);
 const controlModeLabel = requireElement("control-mode-label", HTMLSpanElement);
@@ -100,7 +100,6 @@ const connectionStateValue = requireElement("connection-state-value", HTMLElemen
 const sessionValue = requireElement("session-value", HTMLElement);
 const activeProfileValue = requireElement("active-profile-value", HTMLElement);
 const logCountValue = requireElement("log-count-value", HTMLElement);
-const previewCaption = requireElement("preview-caption", HTMLParagraphElement);
 const previewMeta = requireElement("preview-meta", HTMLDivElement);
 const previewStage = requireElement("preview-stage", HTMLDivElement);
 const displayPreviewRoot = requireElement("display-preview-root", HTMLDivElement);
@@ -255,8 +254,6 @@ function renderProfileOptions(): void {
 function renderProfile(): void {
   const profile = selectedProfile();
   profileSelect.value = profile.id;
-  profileSummary.textContent = `${profile.name} / ${state.backendMode} backend`;
-  previewCaption.textContent = profile.description;
   previewMeta.textContent = formatProfilePreviewMeta(profile);
   activeProfileValue.textContent = profile.id;
   previewStage.dataset.profile = profile.family;
@@ -417,9 +414,9 @@ function renderEventLog(): void {
 
     const details = document.createElement("details");
     const summary = document.createElement("summary");
-    summary.textContent = "JSON";
+    summary.textContent = "Event";
     const payload = document.createElement("pre");
-    payload.textContent = JSON.stringify(entry, null, 2);
+    payload.textContent = JSON.stringify(createEventLogPreview(entry), null, 2);
     details.append(summary, payload);
 
     body.append(title, detailLine, details);
@@ -427,6 +424,26 @@ function renderEventLog(): void {
     return item;
   }));
   eventLog.scrollTop = eventLog.scrollHeight;
+}
+
+function createEventLogPreview(entry: DeviceStudioAppEventLogEntry): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries({
+      id: entry.id,
+      at: entry.at,
+      source: entry.source,
+      kind: entry.kind,
+      mode: entry.mode,
+      state: entry.state,
+      direction: entry.direction,
+      profileId: entry.profileId,
+      sessionId: entry.sessionId,
+      channelId: entry.channelId,
+      messageType: entry.messageType,
+      summary: entry.summary,
+      error: entry.error,
+    }).filter(([, value]) => value !== undefined),
+  );
 }
 
 function render(): void {

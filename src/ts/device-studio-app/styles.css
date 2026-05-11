@@ -285,9 +285,9 @@ button.wide {
 .preview-stage {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(360px, 1fr) minmax(220px, 300px);
+  grid-template-columns: minmax(520px, 1.65fr) minmax(260px, 0.75fr);
   gap: 16px;
-  min-height: 360px;
+  min-height: 520px;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -296,10 +296,10 @@ button.wide {
 
 .display-preview-root {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(150px, 190px);
-  gap: 14px;
+  grid-template-columns: 1fr;
   min-width: 0;
-  padding: 18px;
+  padding: 16px;
+  border-left: 1px solid var(--line);
 }
 
 .lcd-device {
@@ -307,14 +307,14 @@ button.wide {
   justify-self: center;
   display: grid;
   place-items: center;
-  width: min(100%, 470px);
-  min-width: 210px;
-  padding: 18px;
+  width: min(100%, 330px);
+  min-width: 0;
+  padding: 0;
 }
 
 .lcd-bezel {
   --display-aspect: 4 / 3;
-  width: min(100%, 430px);
+  width: min(100%, 320px);
   aspect-ratio: var(--display-aspect);
   padding: 10px;
   border: 1px solid #161f25;
@@ -338,7 +338,7 @@ button.wide {
 }
 
 .display-preview-root[data-shape="round"] .lcd-device {
-  width: min(100%, 410px);
+  width: min(100%, 310px);
 }
 
 .display-preview-root[data-shape="round"] .lcd-bezel,
@@ -483,17 +483,16 @@ button.wide {
 
 .stackchan-preview-root {
   display: grid;
-  grid-template-rows: minmax(260px, 1fr) auto auto;
+  grid-template-rows: minmax(420px, 1fr) auto auto;
   gap: 12px;
   min-width: 0;
   padding: 18px;
-  border-left: 1px solid var(--line);
 }
 
 .stackchan-three-host {
   position: relative;
   min-width: 0;
-  min-height: 260px;
+  min-height: 420px;
   overflow: hidden;
   border-radius: 8px;
   border: 1px solid #172027;
@@ -504,7 +503,7 @@ button.wide {
   display: block;
   width: 100%;
   height: 100%;
-  min-height: 260px;
+  min-height: 420px;
 }
 
 .stackchan-render-error {
@@ -522,7 +521,9 @@ button.wide {
 
 .preview-telemetry {
   display: grid;
-  gap: 8px;
+  grid-template-columns: auto auto minmax(120px, 1fr);
+  align-items: center;
+  gap: 8px 12px;
   min-width: 0;
   font-size: 0.84rem;
 }
@@ -530,7 +531,8 @@ button.wide {
 .preview-hardware-badge {
   justify-self: start;
   max-width: 100%;
-  padding: 5px 8px;
+  min-height: 26px;
+  padding: 4px 8px;
   border-radius: 8px;
   color: #48310e;
   background: #f4dfbf;
@@ -555,6 +557,7 @@ button.wide {
 }
 
 .preview-progress {
+  grid-column: 1 / -1;
   height: 8px;
   overflow: hidden;
   border-radius: 999px;
@@ -568,29 +571,16 @@ button.wide {
   background: var(--accent);
 }
 
-.preview-warning-list {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  color: var(--warn);
-  font-size: 0.78rem;
-}
-
-.preview-warning-list:empty {
-  display: none;
-}
-
 .preview-joint-list {
   display: grid;
-  gap: 7px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
   min-width: 0;
 }
 
 .preview-joint-row {
   display: grid;
-  grid-template-columns: minmax(56px, 1fr) minmax(62px, 1.1fr) auto;
+  grid-template-columns: minmax(64px, 0.8fr) minmax(74px, 1.2fr) auto;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -829,15 +819,16 @@ button.wide {
 
   .preview-stage {
     grid-template-columns: 1fr;
+    min-height: 0;
   }
 
   .stackchan-preview-root {
-    border-top: 1px solid var(--line);
-    border-left: 0;
+    border-bottom: 1px solid var(--line);
   }
 
   .display-preview-root {
     grid-template-columns: 1fr;
+    border-left: 0;
   }
 
   .preview-state {
@@ -879,6 +870,11 @@ button.wide {
   .stackchan-three-host,
   .stackchan-three-canvas,
   .stackchan-render-error {
-    min-height: 230px;
+    min-height: 300px;
+  }
+
+  .preview-telemetry,
+  .preview-joint-list {
+    grid-template-columns: 1fr;
   }
 }

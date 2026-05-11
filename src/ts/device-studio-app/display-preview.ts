@@ -167,7 +167,7 @@ export class DisplayPreview {
       this.touchValue,
       this.channelsValue,
     ]));
-    this.root.replaceChildren(this.device, this.statePanel);
+    this.root.replaceChildren(this.device);
 
     this.surface.addEventListener("pointerdown", this.handlePointerDown);
     this.surface.addEventListener("pointerup", this.handlePointerUp);

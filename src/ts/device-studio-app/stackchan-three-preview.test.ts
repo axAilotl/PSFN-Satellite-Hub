@@ -90,7 +90,7 @@ function makePreviewModel(overrides: Partial<StackChanPreviewModel>): StackChanP
     elapsedLabel: "0 ms",
     frameLabel: "ready @ 0 ms",
     hardwareTone: "warning",
-    hardwareLabel: "Hardware unverified / simulated behavior",
+    hardwareLabel: "Unverified",
     warnings: [],
     joints: [],
     nonBlankRegions: 8,

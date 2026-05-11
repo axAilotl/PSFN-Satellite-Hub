@@ -275,7 +275,7 @@ export class StackChanThreePreview {
     this.camera.lookAt(CAMERA_TARGET);
 
     this.rig.rotation.y = -0.32;
-    this.rig.position.y = -1.55;
+    this.rig.position.y = -0.95;
     this.scene.add(this.rig);
     this.requiredAssembly.visible = false;
     this.rig.add(this.requiredAssembly);

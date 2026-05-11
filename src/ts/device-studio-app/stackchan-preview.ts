@@ -140,7 +140,6 @@ export class StackChanPreview {
   private readonly threePreview?: StackChanThreePreview;
   private readonly renderError?: HTMLElement;
   private readonly statusBadge: HTMLElement;
-  private readonly warningList: HTMLElement;
   private readonly jointList: HTMLElement;
   private readonly progressFill: HTMLElement;
   private readonly elapsedValue: HTMLElement;
@@ -176,11 +175,10 @@ export class StackChanPreview {
     progress.append(this.progressFill);
     telemetry.append(this.statusBadge, this.poseValue, this.elapsedValue, progress);
 
-    this.warningList = createElement(document, "ul", "preview-warning-list");
     this.jointList = createElement(document, "div", "preview-joint-list");
 
     root.classList.add("stackchan-preview-root");
-    root.replaceChildren(this.threeHost, telemetry, this.warningList, this.jointList);
+    root.replaceChildren(this.threeHost, telemetry, this.jointList);
   }
 
   update(profile: StackChanPreviewProfile, renderState: StackChanPreviewRenderState): StackChanPreviewModel {
@@ -194,6 +192,7 @@ export class StackChanPreview {
     this.root.dataset.displayShape = model.displayShape;
     this.root.dataset.hardware = model.hardwareTone;
     this.root.dataset.motion = model.hasMotion ? "available" : "none";
+    this.root.dataset.warningCount = String(model.warnings.length);
     this.root.dataset.previewFingerprint = model.fingerprint;
     this.root.setAttribute(
       "aria-label",
@@ -209,14 +208,6 @@ export class StackChanPreview {
     this.poseValue.textContent = `Yaw ${formatDegrees(model.yawDegrees)} / Pitch ${formatDegrees(model.pitchDegrees)}`;
     this.elapsedValue.textContent = `${model.elapsedLabel} / ${model.frameLabel}`;
     this.progressFill.style.width = `${model.progressPercent}%`;
-
-    this.warningList.replaceChildren(
-      ...model.warnings.map((warning) => {
-        const item = this.root.ownerDocument.createElement("li");
-        item.textContent = warning;
-        return item;
-      }),
-    );
 
     this.jointList.replaceChildren(
       ...model.joints.map((joint) => {
@@ -267,12 +258,10 @@ export function createStackChanPreviewModel(
   const leftEyeMode = eyeMode === "wink" ? "closed" : eyeMode;
   const rightEyeMode = eyeMode === "wink" ? "open" : eyeMode;
   const hardwareLabel = profileVerified && behaviorVerified
-    ? "Hardware verified"
+    ? "Verified"
     : hardwareTone === "unsafe"
-      ? "Unsafe hardware state"
-      : renderState.hardwareVerificationStatus === "simulated-only"
-        ? "Hardware unverified / simulated behavior"
-        : "Hardware unverified";
+      ? "Unsafe"
+      : "Unverified";
   const nonBlankRegions = 5 + joints.length + (warnings.length > 0 ? 1 : 0);
   const fingerprint = [
     profile.id,

@@ -118,7 +118,7 @@ test("Stack-chan preview model maps normalized yaw and pitch render state", () =
   assert.equal(model.hasMotion, true);
   assert.equal(model.displayShape, "rectangular");
   assert.equal(model.hardwareTone, "warning");
-  assert.equal(model.hardwareLabel, "Hardware unverified / simulated behavior");
+  assert.equal(model.hardwareLabel, "Unverified");
   assert.equal(formatPreviewMotion(stackChanProfile, renderState), "Yaw 10deg / Pitch -4deg");
   assert(model.warnings.some((warning) => warning.includes("Not verified")));
   assert(model.warnings.some((warning) => warning.includes("simulation only")));
