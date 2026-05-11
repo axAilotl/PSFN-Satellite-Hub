@@ -64,12 +64,12 @@ button.secondary:hover {
 
 .studio-shell {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr) 380px;
   grid-template-rows: auto minmax(440px, 1fr) minmax(240px, auto);
   grid-template-areas:
     "topbar topbar"
-    "preview controls"
-    "timeline log";
+    "preview operations"
+    "timeline operations";
   gap: 16px;
   width: 100%;
   max-width: 100vw;
@@ -80,9 +80,8 @@ button.secondary:hover {
 
 .topbar,
 .preview-panel,
-.control-panel,
-.timeline-panel,
-.event-log-panel {
+.operation-panel,
+.timeline-panel {
   min-width: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -337,13 +336,59 @@ button.secondary:hover {
   font-weight: 800;
 }
 
-.control-panel {
-  grid-area: controls;
+.operation-panel {
+  grid-area: operations;
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-width: 0;
   padding: 16px;
+}
+
+.ops-block {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ops-block:last-child {
+  min-height: 0;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.session-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.session-grid div {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfa;
+}
+
+.session-grid dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.session-grid dd {
+  min-width: 0;
+  margin: 3px 0 0;
+  overflow: hidden;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .button-row {
@@ -356,8 +401,27 @@ button.secondary:hover {
   flex: 1 1 112px;
 }
 
+.button-row.compact-buttons button {
+  flex: 0 1 auto;
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 0.84rem;
+}
+
 button.wide {
   width: 100%;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .timeline-panel {
@@ -428,17 +492,16 @@ button.wide {
   transform: translateX(-50%);
 }
 
-.event-log-panel {
-  grid-area: log;
-  min-width: 0;
-  padding: 16px;
+.log-block {
+  flex: 1 1 auto;
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .event-log {
   display: grid;
-  gap: 8px;
-  min-height: 190px;
-  max-height: 260px;
+  align-content: start;
+  gap: 10px;
+  min-height: 280px;
   margin: 0;
   padding: 0;
   overflow: auto;
@@ -447,43 +510,123 @@ button.wide {
 
 .event-log li {
   display: grid;
-  grid-template-columns: 70px minmax(96px, 140px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 104px) minmax(0, 1fr);
   gap: 8px;
-  align-items: center;
-  min-height: 38px;
+  align-items: start;
+  min-width: 0;
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fbfcfa;
 }
 
-.event-log span {
+.event-log li[data-source="live"] {
+  border-color: #e0b15f;
+}
+
+.event-log li[data-source="mock"] {
+  border-color: #83c7b8;
+}
+
+.event-log li[data-source="user"] {
+  border-color: #89a9d8;
+}
+
+.event-log li[data-source="behavior"] {
+  border-color: #b5a7dc;
+}
+
+.event-log li[data-source="import/export"] {
+  border-color: #d3a5b4;
+}
+
+.event-log li[data-source="hardware verification"] {
+  border-color: #c7ad76;
+}
+
+.event-meta,
+.event-body {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.event-meta time,
+.event-direction,
+.event-body span {
   color: var(--muted);
+}
+
+.event-meta time {
   font-variant-numeric: tabular-nums;
 }
 
-.event-log strong {
-  font-size: 0.84rem;
+.source-pill {
+  width: fit-content;
+  max-width: 100%;
+  padding: 2px 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  color: #183c37;
+  background: #dbeee7;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.event-log code {
-  min-width: 0;
+.event-direction {
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.event-log strong {
+  overflow-wrap: anywhere;
+  font-size: 0.86rem;
+}
+
+.event-body span {
   overflow: hidden;
-  color: #27413b;
+  font-size: 0.78rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.event-log details {
+  min-width: 0;
+}
+
+.event-log summary {
+  color: var(--accent-strong);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.event-log pre {
+  max-height: 220px;
+  margin: 6px 0 0;
+  padding: 8px;
+  overflow: auto;
+  border-radius: 8px;
+  color: #d9eee9;
+  background: #17211d;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 @media (max-width: 980px) {
   .studio-shell {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto auto auto;
+    grid-template-rows: auto auto auto auto;
     grid-template-areas:
       "topbar"
-      "controls"
+      "operations"
       "preview"
-      "timeline"
-      "log";
+      "timeline";
   }
 
   .topbar {
@@ -522,9 +665,8 @@ button.wide {
 
   .topbar,
   .preview-panel,
-  .control-panel,
-  .timeline-panel,
-  .event-log-panel {
+  .operation-panel,
+  .timeline-panel {
     padding: 16px;
   }
 
@@ -555,6 +697,14 @@ button.wide {
 
   .button-row {
     display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .button-row.compact-buttons {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .session-grid {
     grid-template-columns: 1fr;
   }
 
