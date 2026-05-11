@@ -188,6 +188,7 @@ export class StackChanThreePreview {
   private readonly resizeObserver: ResizeObserver;
   private disposed = false;
   private lastPose: StackChanThreePose | undefined;
+  private animationFrameId: number | undefined;
 
   constructor(private readonly host: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({
@@ -200,6 +201,8 @@ export class StackChanThreePreview {
     this.canvas.className = "stackchan-three-canvas";
     this.canvas.dataset.threeStackchan = "true";
     this.canvas.setAttribute("aria-hidden", "true");
+    this.canvas.addEventListener("webglcontextlost", this.handleWebglContextLost);
+    this.canvas.addEventListener("webglcontextrestored", this.handleWebglContextRestored);
     this.host.dataset.cad = "loading";
     this.renderer.setClearColor(0x000000, 0);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -213,6 +216,7 @@ export class StackChanThreePreview {
     this.resizeObserver = new ResizeObserver(() => this.render());
     this.resizeObserver.observe(this.host);
     this.render();
+    this.scheduleRenderLoop();
   }
 
   update(model: StackChanPreviewModel): void {
@@ -241,7 +245,13 @@ export class StackChanThreePreview {
       return;
     }
     this.disposed = true;
+    if (this.animationFrameId !== undefined) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = undefined;
+    }
     this.resizeObserver.disconnect();
+    this.canvas.removeEventListener("webglcontextlost", this.handleWebglContextLost);
+    this.canvas.removeEventListener("webglcontextrestored", this.handleWebglContextRestored);
     this.renderer.dispose();
     this.scene.traverse((object) => {
       if (object instanceof THREE.Mesh) {
@@ -456,6 +466,24 @@ export class StackChanThreePreview {
 
   private createFacePlane(width: number, height: number, material: THREE.MeshBasicMaterial): THREE.Mesh {
     return new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
+  }
+
+  private readonly handleWebglContextLost = (event: Event): void => {
+    event.preventDefault();
+  };
+
+  private readonly handleWebglContextRestored = (): void => {
+    requestAnimationFrame(() => this.render());
+  };
+
+  private scheduleRenderLoop(): void {
+    this.animationFrameId = requestAnimationFrame(() => {
+      this.animationFrameId = undefined;
+      this.render();
+      if (!this.disposed) {
+        this.scheduleRenderLoop();
+      }
+    });
   }
 
   private render(): void {

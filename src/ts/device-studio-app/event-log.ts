@@ -11,7 +11,9 @@ export type DeviceStudioAppEventSource =
   | DeviceStudioEventSource
   | "behavior"
   | "import/export"
-  | "hardware verification";
+  | "hardware verification"
+  | "sprite"
+  | "user editing";
 
 export interface DeviceStudioAppEventLogEntry {
   id: number;

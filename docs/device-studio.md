@@ -18,6 +18,154 @@ page: a device preview, profile selector, live/mock backend mode switch,
 behavior library, timeline and frame playback controls, structured command and
 event log, provenance labels, and hardware verification state.
 
+## Operator Workflow
+
+Build and launch the browser studio from the repo root:
+
+```bash
+npm run studio:dev
+```
+
+The local server binds to loopback by default and prints the URL, normally
+`http://127.0.0.1:8790`. To inspect the studio from another device on the same
+LAN, bind the server to all interfaces:
+
+```bash
+DEVICE_STUDIO_HOST=0.0.0.0 npm run studio:dev
+```
+
+Use `DEVICE_STUDIO_PORT=<port>` when `8790` is already occupied. When serving
+on a LAN, keep the machine and network trusted: Device Studio is local tooling,
+not an authenticated production service.
+
+The first-screen workflow is:
+
+1. Select a profile in the top bar. The current concrete profiles are M5Stack
+   Stack-chan Reference and Waveshare ESP32-S3 Touch LCD 1.85.
+2. Choose `Mock` or `Live` in Operations.
+3. Press `Connect`. Mock mode creates deterministic in-process hub-like events.
+   Live mode connects to the Hub URL, normally `ws://127.0.0.1:8787/` for a
+   local hub or `ws://<hub-host>:8787/` across the LAN.
+4. Select a behavior card, scrub a frame marker, or press `Play` to inspect the
+   timeline against the selected profile.
+5. Send a typed turn through the Operations panel. `Draft` fills the typed-turn
+   box with a profile-aware prompt for the selected behavior; `Send typed turn`
+   sends it through the selected transport. `Interrupt` stops active playback
+   and sends a transport interrupt when connected.
+6. Inspect the Command/Event Log. Use `Copy` or `Export` to preserve the session
+   evidence alongside behavior or hardware-intake artifacts.
+
+Mock mode is the safe default for authoring because it needs no hub, provider
+credentials, network, or hardware. Live mode is for checking how the studio
+behaves as a simulated satellite against the real PSFN Satellite Hub websocket.
+Live hub events can drive subtitles, speaking lifecycle, interrupt handling, and
+local behavior selection, but they do not prove movement or display behavior on
+real ESP32 hardware.
+
+### Editing Behaviors
+
+The behavior library is profile-aware. A behavior can carry expression, viseme,
+movement, LED, display, and speaking state; playback resolves those semantic
+channels against the selected device profile.
+
+Use this loop when editing or reviewing behavior data:
+
+1. Start in mock mode and select the target profile.
+2. Select a behavior card and play it end to end.
+3. For Stack-chan, inspect the Three.js physical preview for yaw/pitch,
+   expression, and viseme state. For Waveshare round LCD, confirm motion
+   channels drop out while expression and viseme state remain visible on the
+   round display.
+4. Click timeline frame markers to inspect exact frame states and watch for
+   `behavior.channel.unsupported` or clamped-channel events in the log.
+5. Import a behavior JSON file with `Import` when testing externally authored
+   timelines. Import replaces the current browser-side behavior library for the
+   session and records behavior import events.
+6. Export the selected behavior with `Export` before handing it to firmware or
+   hardware intake. The exported JSON preserves provenance and hardware
+   verification fields; do not remove those fields to make a behavior look more
+   mature than it is.
+
+Simulator playback is enough to call a behavior `simulated-only`. It is not
+enough to call servo travel, CAD pivots, display color, touch input, or firmware
+timing verified on hardware.
+
+### Sprite Generation, Review, and Export
+
+Sprite generation is optional. The studio can work entirely from manually
+provided PNGs, and deterministic sprite packing must continue to work without a
+network call.
+
+When generated source art is needed, generation must run through the local
+server or CLI-backed provider that owns `FAL_KEY`. Browser code must never
+receive the key, and event logs must record model IDs, options, prompts, request
+IDs, provenance, and generated asset locations without recording secret values.
+Set the key only in the server process environment:
+
+```bash
+FAL_KEY=<set-in-shell-or-env-file> npm run studio:dev
+```
+
+The review workflow is:
+
+1. Choose the target profile and the expression or viseme frame to fill.
+2. Request generated candidates through the server-side provider, or import
+   local/cached PNG candidates manually.
+3. Review candidates in the sprite workspace. Keep generated candidates marked
+   as host-generated until a human approves them for a named expression or
+   viseme.
+4. Approve one source frame per required expression or viseme ID. Rejected
+   candidates should remain out of the firmware pack.
+5. Pack/export the approved frames into a PNG atlas plus JSON manifest. The
+   manifest records profile display metadata, safe area or round clipping,
+   atlas rectangles, source provenance, and content hashes.
+
+The current headless packer accepts local 8-bit RGBA, non-interlaced PNGs:
+
+```bash
+npm run studio:sprites -- \
+  --profile waveshare.esp32-s3-touch-lcd-1.85 \
+  --out-atlas dist/device-studio-sprites/avatar.png \
+  --out-manifest dist/device-studio-sprites/avatar.json \
+  --frame expression:neutral:assets/device-studio/sprites/neutral.png \
+  --frame viseme:a:assets/device-studio/sprites/viseme-a.png
+```
+
+Use manual import and pack/export when `FAL_KEY` is unset or generation is
+disabled. Missing generation credentials should never block review of already
+available source frames.
+
+### Hardware Verification Checklist
+
+Use hardware verification state to prevent simulator-only data from being
+mistaken for device-proven behavior. Current model states are:
+
+- `unverified`: data exists but has not passed simulator or hardware review
+- `simulated-only`: validates and plays in Device Studio only
+- `partially-verified`: some channels or assets have hardware evidence, but the
+  whole behavior or asset bundle is not fully accepted yet
+- `verified-on-hardware`: measured on the named device and accepted for that
+  device/profile/firmware path
+- `unsafe`: failed hardware intake or is known unsafe for the target
+
+Before promoting anything to `verified-on-hardware`, capture:
+
+- target profile ID, physical device identity, firmware build, and operator
+- behavior ID or sprite manifest ID under test
+- transport mode used during the session and exported event log
+- for Stack-chan, measured yaw/pitch limits, neutral pose, binding/no-binding
+  notes, supply voltage, and whether pivots match the preview assumptions
+- for Waveshare round LCD, display orientation, round clipping, safe area,
+  color/alpha appearance, touch support if used, and any frame-rate or tearing
+  observations
+- pass/fail notes for interrupt behavior and recovery to neutral/rest state
+
+A behavior is only as verified as its least verified safety-sensitive channel.
+For example, a Stack-chan behavior with verified expressions but unverified
+servo movement remains simulator-only for motion. A Waveshare behavior can be
+verified for display rendering without implying anything about servos, LEDs,
+microphones, or speakers.
+
 ## Behavioral Simulator, Not Emulator
 
 Device Studio simulates behavior at the companion-device contract layer. It
@@ -168,8 +316,8 @@ Mock mode should cover these scenarios:
 - local behavior command playback without hub involvement
 
 Mock and live modes should produce the same command/event log schema. The event
-source distinguishes `mock`, `live`, `user`, `renderer`, `import`, `export`,
-and `hardware-verification`.
+source distinguishes `mock`, `live`, `user`, `transport`, `behavior`,
+`import/export`, and `hardware verification`.
 
 ## Device Profile Model
 
@@ -216,7 +364,10 @@ Representative profile shape:
       "min": -20,
       "max": 20,
       "neutral": 0,
-      "verification": "pending_hardware"
+      "hardwareVerification": {
+        "status": "unverified",
+        "label": "Servo range requires hardware intake"
+      }
     },
     {
       "id": "head.pitch",
@@ -225,7 +376,10 @@ Representative profile shape:
       "min": -15,
       "max": 15,
       "neutral": 0,
-      "verification": "pending_hardware"
+      "hardwareVerification": {
+        "status": "unverified",
+        "label": "Servo range requires hardware intake"
+      }
     }
   ],
   "leds": [{ "id": "status.rgb", "kind": "rgb" }],
@@ -238,10 +392,13 @@ Representative profile shape:
     "safety": ["local_only"]
   },
   "provenance": {
-    "source": "host_generated",
+    "source": "host-generated",
     "note": "Initial host-side profile; replace ranges after hardware intake."
   },
-  "verification": "pending_hardware"
+  "hardwareVerification": {
+    "status": "unverified",
+    "label": "Host-side profile; hardware intake required"
+  }
 }
 ```
 
@@ -260,8 +417,7 @@ Stack-chan target profile:
 - LED state can represent status or emotion where the concrete unit supports it.
 - Audio I/O may be represented in capabilities, but the studio MVP can use typed
   turns and local speaking lifecycle events before streaming real audio.
-- Servo limits must start as unverified or pending hardware unless measured on a
-  real device.
+- Servo limits must start as unverified unless measured on a real device.
 
 Waveshare ESP32-S3 1.85 inch round LCD profile:
 
@@ -323,10 +479,13 @@ Representative timeline:
     }
   ],
   "provenance": {
-    "source": "host_generated",
-    "generator": "device-studio"
+    "source": "host-generated",
+    "label": "Device Studio generated draft"
   },
-  "verification": "simulator_verified"
+  "hardwareVerification": {
+    "status": "simulated-only",
+    "label": "Plays in Device Studio only"
+  }
 }
 ```
 
@@ -394,10 +553,11 @@ The current pivot numbers are still simulator metadata and must remain
 
 Sprite generation is optional and server-side. Device Studio tooling may call
 fal.ai models to create source artwork for expressions and visemes, but browser
-code must never receive `FAL_KEY`. The key belongs in runtime environment only:
+code must never receive `FAL_KEY`. The key belongs only in the local server or
+CLI process environment:
 
 ```bash
-export FAL_KEY="..."
+FAL_KEY=<set-in-shell-or-env-file> npm run studio:dev
 ```
 
 The provider should support model IDs through configuration, starting with:
@@ -464,11 +624,11 @@ confirmed device data from host-generated data.
 
 Recommended provenance source values:
 
-- `official_confirmed`: copied from a confirmed official source or vendor docs
-- `hardware_observed`: measured or captured from a real device
-- `host_generated`: generated inside Device Studio or by local tooling
-- `imported_unverified`: imported from an external file without validation
-- `derived`: derived from another profile, behavior, or asset
+- `official`: copied from a confirmed official source or vendor docs
+- `device-derived`: measured or captured from a real device
+- `host-generated`: generated inside Device Studio or by local tooling
+- `user-authored`: manually authored or imported by an operator
+- `test-fixture`: fixture data for tests and local examples
 
 Provenance should include a note and optional URL, commit, artifact path, or
 operator field. Do not mark generated servo ranges as official or hardware-safe
@@ -482,10 +642,11 @@ but still untested in this repo's target firmware path.
 Recommended states:
 
 - `unverified`: exists as data, but no simulator or hardware check has passed
-- `simulator_verified`: validates and plays in Device Studio only
-- `pending_hardware`: ready for bench testing on a physical unit
-- `hardware_verified`: measured on the named hardware and accepted as safe
-- `rejected`: failed hardware intake or is known unsafe for the target device
+- `simulated-only`: validates and plays in Device Studio only
+- `partially-verified`: some channels or assets have hardware evidence, but the
+  whole profile, behavior, or pack is not fully accepted
+- `verified-on-hardware`: measured on the named hardware and accepted as safe
+- `unsafe`: failed hardware intake or is known unsafe for the target device
 
 Verification can apply at multiple levels: profile, movement channel, behavior,
 individual frame, exported asset bundle, and firmware intake report. A behavior
@@ -497,11 +658,11 @@ The event log should record every verification transition:
 {
   "type": "hardware.verification.changed",
   "timestamp": "2026-05-11T16:00:00.000Z",
-  "source": "hardware-verification",
+  "source": "hardware verification",
   "profileId": "stackchan.reference",
   "target": "movement.head.yaw",
-  "from": "pending_hardware",
-  "to": "hardware_verified",
+  "from": "simulated-only",
+  "to": "verified-on-hardware",
   "operator": "bench-intake",
   "note": "Measured on reference unit at 5V supply; no binding observed."
 }
@@ -516,8 +677,8 @@ during a simulation or live hub session.
 Common fields:
 
 - `timestamp`
-- `source`: `live`, `mock`, `user`, `renderer`, `import`, `export`,
-  `hardware-verification`, or `system`
+- `source`: `live`, `mock`, `user`, `transport`, `behavior`, `import/export`,
+  or `hardware verification`
 - `mode`: `live` or `mock`
 - `profileId`
 - `sessionId`
@@ -534,18 +695,19 @@ Important event types:
 - `transport.error`
 - `user.turn.sent`
 - `interrupt.sent`
-- `behavior.selected`
-- `behavior.playback.started`
-- `behavior.frame.applied`
+- `behavior.select`
+- `behavior.playback.start`
+- `behavior.frame.apply`
 - `behavior.channel.unsupported`
 - `behavior.channel.clamped`
-- `behavior.imported`
-- `behavior.exported`
-- `profile.selected`
+- `behavior.import`
+- `behavior.export`
+- `profile.select`
 - `hardware.verification.changed`
 
 The UI should make the source visible with labels such as live hub, mock hub,
-host-generated, official-confirmed, imported-unverified, and hardware-verified.
+host-generated, official, user-authored, simulated-only, partially-verified, and
+verified-on-hardware.
 
 ## Optional Protocol Extensions
 
@@ -587,8 +749,8 @@ Candidate messages:
     "movement": { "head.yaw": -10, "head.pitch": 4 },
     "leds": { "status.rgb": "#44ff88" }
   },
-  "provenance": { "source": "host_generated" },
-  "verification": "simulator_verified"
+  "provenance": { "source": "host-generated" },
+  "hardwareVerification": { "status": "simulated-only" }
 }
 ```
 

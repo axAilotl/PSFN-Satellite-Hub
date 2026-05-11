@@ -1,16 +1,25 @@
 import {
+  BehaviorLibrary,
   createBehaviorPlayback,
   createFixtureBehaviorLibrary,
   exportBehaviorTimeline,
   importBehaviorLibraryJson,
   sampleBehaviorRenderState,
   type BehaviorEvent,
-  type BehaviorLibrary,
   type BehaviorLibraryEntry,
   type BehaviorPlayback,
   type NormalizedBehaviorRenderState,
 } from "../device-studio/behavior.js";
-import type { BehaviorTimeline, HardwareVerification } from "../device-studio/model.js";
+import type {
+  BehaviorChannel,
+  BehaviorFrame,
+  BehaviorTimeline,
+  DisplayFrameState,
+  ExpressionState,
+  HardwareVerification,
+  LedFrameState,
+  VisemeState,
+} from "../device-studio/model.js";
 import {
   concreteDeviceProfiles,
   getConcreteDeviceProfile,
@@ -50,7 +59,35 @@ interface StudioState {
   profileId: string;
   backendMode: DeviceStudioTransportMode;
   selectedBehaviorId: string;
+  selectedFrameIndex: number;
   elapsedMs: number;
+}
+
+interface SpriteCandidate {
+  localId: string;
+  kind: "expression" | "viseme";
+  id: string;
+  source: "generated" | "manual";
+  dataUrl?: string;
+  url?: string;
+  prompt?: string;
+  modelId?: string;
+  generatedAt?: string;
+}
+
+interface ApprovedSpriteFrame {
+  kind: "expression" | "viseme";
+  id: string;
+  dataUrl: string;
+  source: "generated" | "manual";
+  prompt?: string;
+  modelId?: string;
+  generatedAt?: string;
+}
+
+interface SpritePackResult {
+  atlasDataUrl: string;
+  manifest: unknown;
 }
 
 let behaviorLibrary: BehaviorLibrary = createFixtureBehaviorLibrary();
@@ -64,7 +101,17 @@ const state: StudioState = {
   profileId: firstProfile.id,
   backendMode: "mock",
   selectedBehaviorId: firstBehavior.id,
+  selectedFrameIndex: 0,
   elapsedMs: 0,
+};
+
+const spriteState: {
+  candidates: SpriteCandidate[];
+  approved: ApprovedSpriteFrame[];
+  lastPack?: SpritePackResult;
+} = {
+  candidates: [],
+  approved: [],
 };
 
 let hubClient: DeviceStudioHubClient | null = null;
@@ -118,10 +165,50 @@ const draftCommandButton = requireElement("draft-command-button", HTMLButtonElem
 const importBehaviorButton = requireElement("import-behavior-button", HTMLButtonElement);
 const importBehaviorFile = requireElement("import-behavior-file", HTMLInputElement);
 const exportBehaviorButton = requireElement("export-behavior-button", HTMLButtonElement);
+const newBehaviorButton = requireElement("new-behavior-button", HTMLButtonElement);
+const duplicateBehaviorButton = requireElement("duplicate-behavior-button", HTMLButtonElement);
+const deleteBehaviorButton = requireElement("delete-behavior-button", HTMLButtonElement);
+const behaviorNameInput = requireElement("behavior-name-input", HTMLInputElement);
+const behaviorIdInput = requireElement("behavior-id-input", HTMLInputElement);
+const behaviorDurationValue = requireElement("behavior-duration-value", HTMLElement);
+const behaviorHardwareValue = requireElement("behavior-hardware-value", HTMLElement);
+const frameSelect = requireElement("frame-select", HTMLSelectElement);
+const addFrameButton = requireElement("add-frame-button", HTMLButtonElement);
+const duplicateFrameButton = requireElement("duplicate-frame-button", HTMLButtonElement);
+const deleteFrameButton = requireElement("delete-frame-button", HTMLButtonElement);
+const frameTimeInput = requireElement("frame-time-input", HTMLInputElement);
+const frameDurationInput = requireElement("frame-duration-input", HTMLInputElement);
+const frameLabelInput = requireElement("frame-label-input", HTMLInputElement);
+const expressionIdSelect = requireElement("expression-id-select", HTMLSelectElement);
+const expressionEyesSelect = requireElement("expression-eyes-select", HTMLSelectElement);
+const expressionMouthSelect = requireElement("expression-mouth-select", HTMLSelectElement);
+const expressionIntensityInput = requireElement("expression-intensity-input", HTMLInputElement);
+const visemeIdSelect = requireElement("viseme-id-select", HTMLSelectElement);
+const visemeWeightInput = requireElement("viseme-weight-input", HTMLInputElement);
+const displayModeSelect = requireElement("display-mode-select", HTMLSelectElement);
+const backlightInput = requireElement("backlight-input", HTMLInputElement);
+const displayBackgroundInput = requireElement("display-background-input", HTMLInputElement);
+const displayTextInput = requireElement("display-text-input", HTMLInputElement);
+const jointEditorRoot = requireElement("joint-editor-root", HTMLDivElement);
+const ledEditorRoot = requireElement("led-editor-root", HTMLDivElement);
 const playButton = requireElement("play-button", HTMLButtonElement);
 const stopButton = requireElement("stop-button", HTMLButtonElement);
 const copyLogButton = requireElement("copy-log-button", HTMLButtonElement);
 const exportLogButton = requireElement("export-log-button", HTMLButtonElement);
+const spriteKindSelect = requireElement("sprite-kind-select", HTMLSelectElement);
+const spriteTargetSelect = requireElement("sprite-target-select", HTMLSelectElement);
+const spriteModeSelect = requireElement("sprite-mode-select", HTMLSelectElement);
+const spriteModelInput = requireElement("sprite-model-input", HTMLInputElement);
+const spriteSeedInput = requireElement("sprite-seed-input", HTMLInputElement);
+const spriteReferenceInput = requireElement("sprite-reference-input", HTMLInputElement);
+const spritePromptInput = requireElement("sprite-prompt-input", HTMLTextAreaElement);
+const generateSpriteButton = requireElement("generate-sprite-button", HTMLButtonElement);
+const importSpriteButton = requireElement("import-sprite-button", HTMLButtonElement);
+const packSpritesButton = requireElement("pack-sprites-button", HTMLButtonElement);
+const spriteImportFile = requireElement("sprite-import-file", HTMLInputElement);
+const spriteStatus = requireElement("sprite-status", HTMLOutputElement);
+const spriteCandidateGrid = requireElement("sprite-candidate-grid", HTMLDivElement);
+const spriteApprovedGrid = requireElement("sprite-approved-grid", HTMLDivElement);
 
 const displayPreview = new DisplayPreview(displayPreviewRoot, {
   onTouch: (detail) => recordDisplayTouch(detail),
@@ -141,12 +228,19 @@ function behaviorEntries(profile = selectedProfile()): BehaviorLibraryEntry[] {
   return behaviorLibrary.list({ profile, includeIncompatible: true });
 }
 
+function allBehaviorTimelines(): BehaviorTimeline[] {
+  return behaviorLibrary.list().map((entry) => entry.timeline);
+}
+
 function ensureSelectedBehavior(profile = selectedProfile()): void {
   const entries = behaviorEntries(profile);
-  if (entries.some((entry) => entry.id === state.selectedBehaviorId)) {
+  const selected = entries.find((entry) => entry.id === state.selectedBehaviorId);
+  if (selected) {
+    normalizeSelectedFrameIndex(behaviorLibrary.require(selected.id));
     return;
   }
   state.selectedBehaviorId = requireFirst(entries, "No behaviors available for selected profile").id;
+  state.selectedFrameIndex = 0;
   state.elapsedMs = 0;
 }
 
@@ -161,6 +255,16 @@ function selectedBehaviorEntry(): BehaviorLibraryEntry {
 
 function selectedBehaviorTimeline(): BehaviorTimeline {
   return behaviorLibrary.require(selectedBehaviorEntry().id);
+}
+
+function normalizeSelectedFrameIndex(timeline = selectedBehaviorTimeline()): void {
+  const maxIndex = Math.max(0, timeline.frames.length - 1);
+  state.selectedFrameIndex = Math.min(Math.max(state.selectedFrameIndex, 0), maxIndex);
+}
+
+function selectedFrame(timeline = selectedBehaviorTimeline()): BehaviorFrame {
+  normalizeSelectedFrameIndex(timeline);
+  return requireFirst(timeline.frames.slice(state.selectedFrameIndex, state.selectedFrameIndex + 1), "Selected behavior has no frames");
 }
 
 function sampleSelectedBehavior(elapsedMs = state.elapsedMs): NormalizedBehaviorRenderState {
@@ -242,6 +346,193 @@ function verificationPayload(id: string, name: string, verification: HardwareVer
   };
 }
 
+function createAuthoringVerification(): HardwareVerification {
+  return {
+    status: "simulated-only",
+    label: "Authored in Device Studio; not verified on hardware",
+  };
+}
+
+function createAuthoringProvenance(label: string): BehaviorTimeline["provenance"] {
+  return {
+    label,
+    source: "user-authored",
+  };
+}
+
+function createDefaultFrame(profile = selectedProfile()): BehaviorFrame {
+  const joints = Object.fromEntries(profile.joints.map((joint) => [joint.id, { value: joint.neutral }]));
+  const leds = Object.fromEntries(profile.leds.map((led) => [led.id, {
+    color: "#42f57b",
+    brightness: 0.7,
+    effect: "solid" as const,
+  }]));
+  return {
+    atMs: 0,
+    durationMs: 600,
+    label: "Frame 1",
+    expression: {
+      id: profile.face.expressions[0] ?? "neutral",
+      intensity: 1,
+      eyes: "open",
+      mouth: "neutral",
+    },
+    viseme: {
+      id: profile.face.visemes[0] ?? "rest",
+      weight: 1,
+    },
+    display: {
+      mode: "face",
+      backgroundColor: "#101918",
+    },
+    backlight: {
+      brightness: profile.backlight.supported ? 0.82 : 0,
+    },
+    ...(Object.keys(joints).length > 0 ? { joints } : {}),
+    ...(Object.keys(leds).length > 0 ? { leds } : {}),
+    hardwareVerification: createAuthoringVerification(),
+  };
+}
+
+function createEditableBehaviorTimeline(name: string, source?: BehaviorTimeline): BehaviorTimeline {
+  const profile = selectedProfile();
+  const baseId = slugifyBehaviorId(name || "custom behavior");
+  const id = uniqueBehaviorId(source ? `${baseId}.copy` : baseId);
+  const frames = source
+    ? source.frames.map((frame) => cloneJsonish(frame))
+    : [createDefaultFrame(profile)];
+  return {
+    id,
+    name: name || "Custom Behavior",
+    compatibleProfileIds: [profile.id],
+    channels: inferTimelineChannels(frames),
+    durationMs: calculateTimelineDuration(frames),
+    frames,
+    provenance: createAuthoringProvenance(source ? `Duplicated from ${source.name}` : "Device Studio authoring"),
+    hardwareVerification: createAuthoringVerification(),
+  };
+}
+
+function replaceBehaviorTimeline(timeline: BehaviorTimeline): void {
+  const timelines = allBehaviorTimelines().filter((candidate) => candidate.id !== timeline.id);
+  behaviorLibrary = new BehaviorLibrary([...timelines, {
+    ...timeline,
+    channels: inferTimelineChannels(timeline.frames),
+    durationMs: calculateTimelineDuration(timeline.frames),
+    hardwareVerification: timeline.hardwareVerification ?? createAuthoringVerification(),
+    provenance: timeline.provenance ?? createAuthoringProvenance("Device Studio authoring"),
+  }]);
+  state.selectedBehaviorId = timeline.id;
+  normalizeSelectedFrameIndex();
+}
+
+function deleteBehaviorTimeline(id: string): void {
+  const remaining = allBehaviorTimelines().filter((timeline) => timeline.id !== id);
+  if (remaining.length === 0) {
+    return;
+  }
+  behaviorLibrary = new BehaviorLibrary(remaining);
+  state.selectedBehaviorId = remaining[0]?.id ?? state.selectedBehaviorId;
+  state.selectedFrameIndex = 0;
+  state.elapsedMs = 0;
+}
+
+function updateSelectedTimeline(
+  update: (timeline: BehaviorTimeline) => BehaviorTimeline,
+  eventSummary: string,
+): void {
+  stopActivePlayback("edited");
+  const previous = selectedBehaviorTimeline();
+  const next = update(cloneJsonish(previous));
+  replaceBehaviorTimeline(next);
+  const frame = selectedFrame();
+  state.elapsedMs = frame.atMs;
+  renderBehaviorList();
+  renderBehavior();
+  renderAuthoringEditor();
+  recordEvent({
+    ...activeSessionContext(),
+    source: "user editing",
+    kind: "behavior.edit",
+    summary: eventSummary,
+    payload: {
+      behaviorId: state.selectedBehaviorId,
+      frameIndex: state.selectedFrameIndex,
+      hardwareVerificationStatus: selectedBehaviorTimeline().hardwareVerification.status,
+    },
+  });
+}
+
+function updateSelectedFrame(
+  update: (frame: BehaviorFrame, timeline: BehaviorTimeline) => BehaviorFrame,
+  eventSummary: string,
+): void {
+  updateSelectedTimeline((timeline) => {
+    const frames = timeline.frames.map((frame, index) => {
+      if (index !== state.selectedFrameIndex) {
+        return frame;
+      }
+      return {
+        ...update(cloneJsonish(frame), timeline),
+        hardwareVerification: createAuthoringVerification(),
+      };
+    });
+    return {
+      ...timeline,
+      frames,
+      channels: inferTimelineChannels(frames),
+      durationMs: calculateTimelineDuration(frames),
+      hardwareVerification: createAuthoringVerification(),
+      provenance: createAuthoringProvenance("Edited in Device Studio"),
+    };
+  }, eventSummary);
+}
+
+function inferTimelineChannels(frames: BehaviorFrame[]): BehaviorChannel[] {
+  const channels = new Set<BehaviorChannel>();
+  for (const frame of frames) {
+    if (frame.expression) channels.add("expression");
+    if (frame.viseme) channels.add("viseme");
+    if (frame.display) channels.add("display");
+    if (frame.backlight) channels.add("backlight");
+    if (frame.joints && Object.keys(frame.joints).length > 0) channels.add("joints");
+    if (frame.leds && Object.keys(frame.leds).length > 0) channels.add("leds");
+  }
+  const order: BehaviorChannel[] = ["expression", "viseme", "joints", "display", "backlight", "leds"];
+  return order.filter((channel) => channels.has(channel));
+}
+
+function calculateTimelineDuration(frames: BehaviorFrame[]): number {
+  return Math.max(1, ...frames.map((frame) => frame.atMs + (frame.durationMs ?? 0)));
+}
+
+function slugifyBehaviorId(value: string): string {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `behavior.${slug || "custom"}`;
+}
+
+function uniqueBehaviorId(baseId: string): string {
+  const existing = new Set(allBehaviorTimelines().map((timeline) => timeline.id));
+  if (!existing.has(baseId)) {
+    return baseId;
+  }
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${baseId}-${index}`;
+    if (!existing.has(candidate)) {
+      return candidate;
+    }
+  }
+  return `${baseId}-${Date.now()}`;
+}
+
+function cloneJsonish<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 function renderProfileOptions(): void {
   profileSelect.replaceChildren(...concreteDeviceProfiles.map((profile) => {
     const option = document.createElement("option");
@@ -284,6 +575,180 @@ function renderBehavior(): void {
   renderFrameLane();
 }
 
+function renderAuthoringEditor(): void {
+  const profile = selectedProfile();
+  const timeline = selectedBehaviorTimeline();
+  normalizeSelectedFrameIndex(timeline);
+  const frame = selectedFrame(timeline);
+  const renderState = sampleSelectedBehavior(frame.atMs);
+
+  behaviorNameInput.value = timeline.name;
+  behaviorIdInput.value = timeline.id;
+  behaviorDurationValue.textContent = `${calculateTimelineDuration(timeline.frames)} ms`;
+  behaviorHardwareValue.textContent = timeline.hardwareVerification.status;
+  deleteBehaviorButton.disabled = allBehaviorTimelines().length <= 1;
+
+  frameSelect.replaceChildren(...timeline.frames.map((candidate, index) => {
+    const option = document.createElement("option");
+    option.value = String(index);
+    option.textContent = `${index + 1} / ${candidate.atMs} ms / ${candidate.label ?? "frame"}`;
+    return option;
+  }));
+  frameSelect.value = String(state.selectedFrameIndex);
+  deleteFrameButton.disabled = timeline.frames.length <= 1;
+  duplicateFrameButton.disabled = timeline.frames.length === 0;
+
+  frameTimeInput.value = String(frame.atMs);
+  frameDurationInput.value = String(frame.durationMs ?? 0);
+  frameLabelInput.value = frame.label ?? "";
+
+  renderOptionSelect(expressionIdSelect, profile.face.expressions, frame.expression?.id ?? renderState.expression?.id ?? "neutral");
+  renderOptionSelect(visemeIdSelect, profile.face.visemes, frame.viseme?.id ?? renderState.viseme?.id ?? "rest");
+  expressionEyesSelect.value = frame.expression?.eyes ?? renderState.expression?.eyes ?? "open";
+  expressionMouthSelect.value = frame.expression?.mouth ?? renderState.expression?.mouth ?? "neutral";
+  expressionIntensityInput.value = String(frame.expression?.intensity ?? renderState.expression?.intensity ?? 1);
+  visemeWeightInput.value = String(frame.viseme?.weight ?? renderState.viseme?.weight ?? 1);
+  displayModeSelect.value = frame.display?.mode ?? renderState.display?.mode ?? "face";
+  displayBackgroundInput.value = normalizeColor(frame.display?.backgroundColor ?? renderState.display?.backgroundColor ?? "#101918");
+  displayTextInput.value = frame.display?.text ?? renderState.display?.text ?? "";
+  backlightInput.value = String(frame.backlight?.brightness ?? renderState.backlight?.brightness ?? 0.82);
+
+  const supportsExpression = profile.capabilities.output.includes("expression");
+  const supportsViseme = profile.capabilities.output.includes("viseme");
+  const supportsDisplay = profile.capabilities.output.includes("display");
+  expressionIdSelect.disabled = !supportsExpression;
+  expressionEyesSelect.disabled = !supportsExpression;
+  expressionMouthSelect.disabled = !supportsExpression;
+  expressionIntensityInput.disabled = !supportsExpression;
+  visemeIdSelect.disabled = !supportsViseme;
+  visemeWeightInput.disabled = !supportsViseme;
+  displayModeSelect.disabled = !supportsDisplay;
+  displayBackgroundInput.disabled = !supportsDisplay;
+  displayTextInput.disabled = !supportsDisplay || displayModeSelect.value !== "text";
+  backlightInput.disabled = !profile.backlight.supported;
+
+  renderJointEditor(profile, frame);
+  renderLedEditor(profile, frame);
+}
+
+function renderOptionSelect(select: HTMLSelectElement, values: readonly string[], selectedValue: string): void {
+  const uniqueValues = [...new Set([selectedValue, ...values].filter(Boolean))];
+  select.replaceChildren(...uniqueValues.map((value) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    return option;
+  }));
+  select.value = selectedValue;
+}
+
+function renderJointEditor(profile: ConcreteDeviceProfile, frame: BehaviorFrame): void {
+  if (profile.joints.length === 0) {
+    jointEditorRoot.replaceChildren();
+    jointEditorRoot.hidden = true;
+    return;
+  }
+
+  jointEditorRoot.hidden = false;
+  jointEditorRoot.replaceChildren(...profile.joints.map((joint) => {
+    const value = frame.joints?.[joint.id]?.value ?? joint.neutral;
+    const row = document.createElement("label");
+    row.className = "channel-row";
+    const name = document.createElement("span");
+    name.textContent = joint.name;
+    const range = document.createElement("input");
+    range.type = "range";
+    range.min = String(joint.min);
+    range.max = String(joint.max);
+    range.step = "1";
+    range.value = String(value);
+    const number = document.createElement("input");
+    number.type = "number";
+    number.min = String(joint.min);
+    number.max = String(joint.max);
+    number.step = "1";
+    number.value = String(value);
+    const applyValue = (raw: string): void => {
+      const nextValue = clampNumber(Number(raw), joint.min, joint.max);
+      range.value = String(nextValue);
+      number.value = String(nextValue);
+      updateSelectedFrame((current) => ({
+        ...current,
+        joints: {
+          ...(current.joints ?? {}),
+          [joint.id]: { value: nextValue },
+        },
+      }), `${joint.id} ${nextValue}${joint.unit === "degrees" ? "deg" : "mm"}`);
+    };
+    range.addEventListener("input", () => applyValue(range.value));
+    number.addEventListener("change", () => applyValue(number.value));
+    row.append(name, range, number);
+    return row;
+  }));
+}
+
+function renderLedEditor(profile: ConcreteDeviceProfile, frame: BehaviorFrame): void {
+  if (profile.leds.length === 0) {
+    ledEditorRoot.replaceChildren();
+    ledEditorRoot.hidden = true;
+    return;
+  }
+
+  ledEditorRoot.hidden = false;
+  ledEditorRoot.replaceChildren(...profile.leds.map((led) => {
+    const current = frame.leds?.[led.id] ?? {};
+    const row = document.createElement("label");
+    row.className = "channel-row led-row";
+    const name = document.createElement("span");
+    name.textContent = led.name;
+    const color = document.createElement("input");
+    color.type = "color";
+    color.value = normalizeColor(current.color ?? "#42f57b");
+    const brightness = document.createElement("input");
+    brightness.type = "range";
+    brightness.min = "0";
+    brightness.max = "1";
+    brightness.step = "0.05";
+    brightness.value = String(current.brightness ?? 0.7);
+    const effect = document.createElement("select");
+    renderOptionSelect(effect, ["solid", "pulse", "blink", "off"], current.effect ?? "solid");
+    const applyLed = (): void => {
+      const value: LedFrameState = {
+        color: color.value,
+        brightness: clampUnitNumber(Number(brightness.value)),
+        effect: effect.value as LedFrameState["effect"],
+      };
+      updateSelectedFrame((currentFrame) => ({
+        ...currentFrame,
+        leds: {
+          ...(currentFrame.leds ?? {}),
+          [led.id]: value,
+        },
+      }), `${led.id} ${value.effect ?? "solid"}`);
+    };
+    color.addEventListener("input", applyLed);
+    brightness.addEventListener("input", applyLed);
+    effect.addEventListener("change", applyLed);
+    row.append(name, color, brightness, effect);
+    return row;
+  }));
+}
+
+function normalizeColor(value: string): string {
+  return /^#[0-9a-f]{6}$/i.test(value) ? value : "#101918";
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+  return Math.min(max, Math.max(min, value));
+}
+
+function clampUnitNumber(value: number): number {
+  return clampNumber(value, 0, 1);
+}
+
 function applyRenderStateToPreview(renderState: NormalizedBehaviorRenderState): void {
   state.elapsedMs = renderState.elapsedMs;
   previewStage.dataset.hardwareVerified = String(renderState.hardwareVerified);
@@ -308,7 +773,11 @@ function renderFrameLane(): void {
     marker.textContent = String(index + 1);
     marker.dataset.active = String(renderState.activeFrame?.index === index);
     marker.setAttribute("aria-label", `Frame ${index + 1} at ${frame.atMs} milliseconds`);
-    marker.addEventListener("click", () => applyBehaviorFrame(frame.atMs));
+    marker.addEventListener("click", () => {
+      state.selectedFrameIndex = index;
+      applyBehaviorFrame(frame.atMs);
+      renderAuthoringEditor();
+    });
     return marker;
   }));
 }
@@ -347,9 +816,11 @@ function renderBehaviorList(): void {
     button.addEventListener("click", () => {
       stopActivePlayback("behavior changed");
       state.selectedBehaviorId = entry.id;
+      state.selectedFrameIndex = 0;
       state.elapsedMs = 0;
       renderBehaviorList();
       renderBehavior();
+      renderAuthoringEditor();
       recordEvent({
         ...activeSessionContext(),
         source: "behavior",
@@ -452,6 +923,8 @@ function render(): void {
   renderMode();
   renderBehaviorList();
   renderBehavior();
+  renderAuthoringEditor();
+  renderSpriteWorkspace();
   renderEventLog();
 }
 
@@ -662,6 +1135,180 @@ function createDraftCommand(): void {
   });
 }
 
+function createNewBehavior(): void {
+  const timeline = createEditableBehaviorTimeline("Custom Behavior");
+  replaceBehaviorTimeline(timeline);
+  state.selectedFrameIndex = 0;
+  state.elapsedMs = 0;
+  render();
+  recordEvent({
+    ...activeSessionContext(),
+    source: "user editing",
+    kind: "behavior.create",
+    summary: timeline.name,
+    payload: { behaviorId: timeline.id, profileId: selectedProfile().id },
+  });
+}
+
+function duplicateSelectedBehavior(): void {
+  const source = selectedBehaviorTimeline();
+  const timeline = createEditableBehaviorTimeline(`${source.name} Copy`, source);
+  replaceBehaviorTimeline(timeline);
+  state.selectedFrameIndex = 0;
+  state.elapsedMs = 0;
+  render();
+  recordEvent({
+    ...activeSessionContext(),
+    source: "user editing",
+    kind: "behavior.duplicate",
+    summary: timeline.name,
+    payload: { behaviorId: timeline.id, sourceBehaviorId: source.id },
+  });
+}
+
+function deleteSelectedBehavior(): void {
+  const timeline = selectedBehaviorTimeline();
+  deleteBehaviorTimeline(timeline.id);
+  stopActivePlayback("behavior deleted");
+  render();
+  recordEvent({
+    ...activeSessionContext(),
+    source: "user editing",
+    kind: "behavior.delete",
+    summary: timeline.name,
+    payload: { behaviorId: timeline.id },
+  });
+}
+
+function updateSelectedBehaviorName(): void {
+  const name = behaviorNameInput.value.trim() || "Custom Behavior";
+  updateSelectedTimeline((timeline) => ({
+    ...timeline,
+    name,
+    provenance: createAuthoringProvenance("Renamed in Device Studio"),
+    hardwareVerification: createAuthoringVerification(),
+  }), `name ${name}`);
+}
+
+function addBehaviorFrame(): void {
+  const timeline = selectedBehaviorTimeline();
+  const current = selectedFrame(timeline);
+  const nextFrame: BehaviorFrame = {
+    ...cloneJsonish(current),
+    atMs: current.atMs + (current.durationMs ?? 250),
+    label: `Frame ${timeline.frames.length + 1}`,
+    hardwareVerification: createAuthoringVerification(),
+  };
+  updateSelectedTimeline((currentTimeline) => {
+    const frames = [...currentTimeline.frames, nextFrame].sort((left, right) => left.atMs - right.atMs);
+    state.selectedFrameIndex = frames.findIndex((frame) => frame === nextFrame);
+    return {
+      ...currentTimeline,
+      frames,
+      channels: inferTimelineChannels(frames),
+      durationMs: calculateTimelineDuration(frames),
+      hardwareVerification: createAuthoringVerification(),
+      provenance: createAuthoringProvenance("Edited in Device Studio"),
+    };
+  }, "frame added");
+}
+
+function duplicateBehaviorFrame(): void {
+  const timeline = selectedBehaviorTimeline();
+  const current = selectedFrame(timeline);
+  const copy: BehaviorFrame = {
+    ...cloneJsonish(current),
+    atMs: current.atMs + 100,
+    label: `${current.label ?? `Frame ${state.selectedFrameIndex + 1}`} copy`,
+    hardwareVerification: createAuthoringVerification(),
+  };
+  updateSelectedTimeline((currentTimeline) => {
+    const frames = [...currentTimeline.frames, copy].sort((left, right) => left.atMs - right.atMs);
+    state.selectedFrameIndex = frames.findIndex((frame) => frame === copy);
+    return {
+      ...currentTimeline,
+      frames,
+      channels: inferTimelineChannels(frames),
+      durationMs: calculateTimelineDuration(frames),
+      hardwareVerification: createAuthoringVerification(),
+      provenance: createAuthoringProvenance("Edited in Device Studio"),
+    };
+  }, "frame duplicated");
+}
+
+function deleteBehaviorFrame(): void {
+  const timeline = selectedBehaviorTimeline();
+  if (timeline.frames.length <= 1) {
+    return;
+  }
+  const deletedIndex = state.selectedFrameIndex;
+  updateSelectedTimeline((currentTimeline) => {
+    const frames = currentTimeline.frames.filter((_, index) => index !== deletedIndex);
+    state.selectedFrameIndex = Math.min(deletedIndex, frames.length - 1);
+    return {
+      ...currentTimeline,
+      frames,
+      channels: inferTimelineChannels(frames),
+      durationMs: calculateTimelineDuration(frames),
+      hardwareVerification: createAuthoringVerification(),
+      provenance: createAuthoringProvenance("Edited in Device Studio"),
+    };
+  }, "frame deleted");
+}
+
+function selectFrame(index: number): void {
+  const timeline = selectedBehaviorTimeline();
+  state.selectedFrameIndex = Math.min(Math.max(index, 0), timeline.frames.length - 1);
+  state.elapsedMs = selectedFrame(timeline).atMs;
+  applyBehaviorFrame(state.elapsedMs);
+  renderAuthoringEditor();
+}
+
+function updateFrameTiming(): void {
+  updateSelectedFrame((frame) => ({
+    ...frame,
+    atMs: Math.max(0, Math.round(Number(frameTimeInput.value) || 0)),
+    durationMs: Math.max(0, Math.round(Number(frameDurationInput.value) || 0)),
+    label: frameLabelInput.value.trim() || undefined,
+  }), "frame timing");
+}
+
+function updateFrameExpression(): void {
+  const expression: ExpressionState = {
+    id: expressionIdSelect.value,
+    eyes: expressionEyesSelect.value as ExpressionState["eyes"],
+    mouth: expressionMouthSelect.value as ExpressionState["mouth"],
+    intensity: clampUnitNumber(Number(expressionIntensityInput.value)),
+  };
+  updateSelectedFrame((frame) => ({ ...frame, expression }), `expression ${expression.id}`);
+}
+
+function updateFrameViseme(): void {
+  const viseme: VisemeState = {
+    id: visemeIdSelect.value,
+    weight: clampUnitNumber(Number(visemeWeightInput.value)),
+  };
+  updateSelectedFrame((frame) => ({ ...frame, viseme }), `viseme ${viseme.id}`);
+}
+
+function updateFrameDisplay(): void {
+  const mode = displayModeSelect.value as DisplayFrameState["mode"];
+  const display: DisplayFrameState = {
+    mode,
+    backgroundColor: displayBackgroundInput.value,
+    ...(mode === "text" ? { text: displayTextInput.value } : {}),
+    ...(mode === "image" ? { assetId: `${spriteKindSelect.value}:${spriteTargetSelect.value}` } : {}),
+  };
+  updateSelectedFrame((frame) => ({ ...frame, display }), `display ${display.mode}`);
+}
+
+function updateFrameBacklight(): void {
+  updateSelectedFrame((frame) => ({
+    ...frame,
+    backlight: { brightness: clampUnitNumber(Number(backlightInput.value)) },
+  }), "backlight");
+}
+
 function exportSelectedBehavior(): void {
   const timeline = selectedBehaviorTimeline();
   const json = exportBehaviorTimeline(timeline, { emit: recordBehaviorEvent, space: 2 });
@@ -695,6 +1342,359 @@ async function importBehaviorFileSelection(): Promise<void> {
   } finally {
     importBehaviorFile.value = "";
   }
+}
+
+function renderSpriteWorkspace(): void {
+  const profile = selectedProfile();
+  const kind: SpriteCandidate["kind"] = spriteKindSelect.value === "viseme" ? "viseme" : "expression";
+  const targets = kind === "expression" ? profile.face.expressions : profile.face.visemes;
+  renderOptionSelect(spriteTargetSelect, targets, targets.includes(spriteTargetSelect.value) ? spriteTargetSelect.value : targets[0] ?? "neutral");
+  spriteStatus.value = `${spriteState.approved.length} approved frames`;
+  packSpritesButton.disabled = spriteState.approved.length === 0;
+
+  spriteCandidateGrid.replaceChildren(...spriteState.candidates.map((candidate) => createSpriteCard(candidate, false)));
+  spriteApprovedGrid.replaceChildren(
+    ...spriteState.approved.map((frame) => createSpriteCard({
+      localId: `approved:${frame.kind}:${frame.id}`,
+      kind: frame.kind,
+      id: frame.id,
+      source: frame.source,
+      dataUrl: frame.dataUrl,
+      prompt: frame.prompt,
+      modelId: frame.modelId,
+      generatedAt: frame.generatedAt,
+    }, true)),
+    ...(spriteState.lastPack ? [createPackResultCard(spriteState.lastPack)] : []),
+  );
+}
+
+function createSpriteCard(candidate: SpriteCandidate, approved: boolean): HTMLElement {
+  const card = document.createElement("article");
+  card.className = "sprite-card";
+  card.dataset.approved = String(approved);
+
+  const image = document.createElement("img");
+  image.alt = `${candidate.kind} ${candidate.id}`;
+  image.src = candidate.dataUrl ?? candidate.url ?? "";
+
+  const title = document.createElement("strong");
+  title.textContent = `${candidate.kind}:${candidate.id}`;
+  const meta = document.createElement("span");
+  meta.textContent = [
+    candidate.source,
+    candidate.modelId,
+    candidate.dataUrl ? "pack-ready" : "review-only",
+  ].filter(Boolean).join(" / ");
+
+  const actions = document.createElement("div");
+  actions.className = "button-row compact-buttons";
+  if (approved) {
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "secondary";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", () => removeApprovedSprite(candidate.kind, candidate.id));
+    actions.append(remove);
+  } else {
+    const approve = document.createElement("button");
+    approve.type = "button";
+    approve.textContent = "Approve";
+    approve.disabled = !candidate.dataUrl;
+    approve.addEventListener("click", () => approveSpriteCandidate(candidate.localId));
+    const reject = document.createElement("button");
+    reject.type = "button";
+    reject.className = "secondary";
+    reject.textContent = "Reject";
+    reject.addEventListener("click", () => rejectSpriteCandidate(candidate.localId));
+    actions.append(approve, reject);
+  }
+
+  card.append(image, title, meta, actions);
+  return card;
+}
+
+function createPackResultCard(result: SpritePackResult): HTMLElement {
+  const card = document.createElement("article");
+  card.className = "sprite-card pack-result";
+  const image = document.createElement("img");
+  image.alt = "Packed sprite atlas";
+  image.src = result.atlasDataUrl;
+  const title = document.createElement("strong");
+  title.textContent = "Packed atlas";
+  const meta = document.createElement("span");
+  const manifest = result.manifest as { frames?: unknown[]; atlas?: { width?: number; height?: number } };
+  meta.textContent = `${manifest.frames?.length ?? 0} frames / ${manifest.atlas?.width ?? "?"} x ${manifest.atlas?.height ?? "?"}`;
+  card.append(image, title, meta);
+  return card;
+}
+
+async function generateSpriteCandidate(): Promise<void> {
+  const kind: SpriteCandidate["kind"] = spriteKindSelect.value === "viseme" ? "viseme" : "expression";
+  const id = spriteTargetSelect.value;
+  const prompt = spritePromptInput.value.trim();
+  const modelId = spriteModelInput.value.trim();
+  if (!prompt || !modelId) {
+    recordEvent({
+      ...activeSessionContext(),
+      source: "sprite",
+      kind: "sprite.generate.rejected",
+      summary: "prompt and model are required",
+    });
+    return;
+  }
+
+  generateSpriteButton.disabled = true;
+  try {
+    const payload: Record<string, unknown> = {
+      mode: spriteModeSelect.value,
+      modelId,
+      prompt,
+      provenance: {
+        label: `${kind}:${id}`,
+        source: "host-generated",
+      },
+    };
+    const seed = Number(spriteSeedInput.value);
+    if (Number.isFinite(seed)) payload.seed = seed;
+    const referenceUrl = spriteReferenceInput.value.trim();
+    if (referenceUrl) payload.imageUrl = referenceUrl;
+
+    const response = await postJson<{ ok: true; result: {
+      modelId: string;
+      generatedAt: string;
+      prompt: string;
+      images: Array<{ url: string; dataUrl?: string; packReady?: boolean; packIssue?: string }>;
+    } } | { ok: false; error: { code: string; message: string } }>("/api/sprites/generate", payload);
+    if (!response.ok) {
+      throw new Error(response.error.message);
+    }
+    const candidates = response.result.images.map((image, index) => ({
+      localId: `generated:${Date.now()}:${index}`,
+      kind,
+      id,
+      source: "generated" as const,
+      dataUrl: image.dataUrl,
+      url: image.url,
+      prompt: response.result.prompt,
+      modelId: response.result.modelId,
+      generatedAt: response.result.generatedAt,
+    }));
+    spriteState.candidates.unshift(...candidates);
+    renderSpriteWorkspace();
+    recordEvent({
+      ...activeSessionContext(),
+      source: "sprite",
+      kind: "sprite.generate",
+      summary: `${kind}:${id}`,
+      payload: {
+        modelId: response.result.modelId,
+        imageCount: response.result.images.length,
+        packReadyCount: response.result.images.filter((image) => image.packReady || image.dataUrl).length,
+      },
+    });
+  } catch (error) {
+    recordEvent({
+      ...activeSessionContext(),
+      source: "sprite",
+      kind: "sprite.generate.failed",
+      summary: error instanceof Error ? error.message : "Generation failed",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    generateSpriteButton.disabled = false;
+  }
+}
+
+async function importSpriteFiles(): Promise<void> {
+  const files = [...(spriteImportFile.files ?? [])];
+  if (files.length === 0) {
+    return;
+  }
+  const imported: SpriteCandidate[] = [];
+  for (const [index, file] of files.entries()) {
+    if (file.type !== "image/png") {
+      recordEvent({
+        ...activeSessionContext(),
+        source: "sprite",
+        kind: "sprite.import.rejected",
+        summary: `${file.name} is not PNG`,
+      });
+      continue;
+    }
+    const target = inferSpriteTargetFromFilename(file.name);
+    imported.push({
+      localId: `manual:${Date.now()}:${index}`,
+      kind: target.kind,
+      id: target.id,
+      source: "manual",
+      dataUrl: await readFileAsDataUrl(file),
+    });
+  }
+  spriteState.candidates.unshift(...imported);
+  spriteImportFile.value = "";
+  renderSpriteWorkspace();
+  recordEvent({
+    ...activeSessionContext(),
+    source: "sprite",
+    kind: "sprite.import",
+    summary: `${imported.length} PNG frames`,
+  });
+}
+
+function inferSpriteTargetFromFilename(name: string): Pick<SpriteCandidate, "kind" | "id"> {
+  const lower = name.toLowerCase();
+  const tokens = lower.split(/[^a-z0-9]+/).filter(Boolean);
+  const profile = selectedProfile();
+  const expression = profile.face.expressions.find((id) => tokens.includes(id.toLowerCase()));
+  if (expression || tokens.includes("expression")) {
+    return { kind: "expression", id: expression ?? spriteTargetSelect.value };
+  }
+  const viseme = profile.face.visemes.find((id) => tokens.includes(id.toLowerCase()));
+  if (viseme || tokens.includes("viseme")) {
+    return { kind: "viseme", id: viseme ?? spriteTargetSelect.value };
+  }
+  return {
+    kind: spriteKindSelect.value === "viseme" ? "viseme" : "expression",
+    id: spriteTargetSelect.value,
+  };
+}
+
+function approveSpriteCandidate(localId: string): void {
+  const candidate = spriteState.candidates.find((item) => item.localId === localId);
+  if (!candidate?.dataUrl) {
+    return;
+  }
+  spriteState.approved = [
+    ...spriteState.approved.filter((frame) => frame.kind !== candidate.kind || frame.id !== candidate.id),
+    {
+      kind: candidate.kind,
+      id: candidate.id,
+      dataUrl: candidate.dataUrl,
+      source: candidate.source,
+      prompt: candidate.prompt,
+      modelId: candidate.modelId,
+      generatedAt: candidate.generatedAt,
+    },
+  ];
+  spriteState.candidates = spriteState.candidates.filter((item) => item.localId !== localId);
+  spriteState.lastPack = undefined;
+  renderSpriteWorkspace();
+  recordEvent({
+    ...activeSessionContext(),
+    source: "sprite",
+    kind: "sprite.approve",
+    summary: `${candidate.kind}:${candidate.id}`,
+  });
+}
+
+function rejectSpriteCandidate(localId: string): void {
+  spriteState.candidates = spriteState.candidates.filter((item) => item.localId !== localId);
+  renderSpriteWorkspace();
+}
+
+function removeApprovedSprite(kind: SpriteCandidate["kind"], id: string): void {
+  spriteState.approved = spriteState.approved.filter((frame) => frame.kind !== kind || frame.id !== id);
+  spriteState.lastPack = undefined;
+  renderSpriteWorkspace();
+}
+
+async function packApprovedSprites(): Promise<void> {
+  if (spriteState.approved.length === 0) {
+    return;
+  }
+  packSpritesButton.disabled = true;
+  try {
+    const response = await postJson<{ ok: true; atlasDataUrl: string; manifest: unknown } | { ok: false; error: { message: string } }>(
+      "/api/sprites/pack",
+      {
+        profileId: selectedProfile().id,
+        atlasId: `${selectedProfile().id}.sprites`,
+        frames: spriteState.approved.map((frame) => ({
+          id: frame.id,
+          kind: frame.kind,
+          dataUrl: frame.dataUrl,
+          provenance: {
+            label: `${frame.source} ${frame.kind}:${frame.id}`,
+            source: frame.source === "manual" ? "user-authored" : "host-generated",
+            notes: [frame.modelId, frame.generatedAt].filter(Boolean).join(" / ") || undefined,
+          },
+        })),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(response.error.message);
+    }
+    spriteState.lastPack = {
+      atlasDataUrl: response.atlasDataUrl,
+      manifest: response.manifest,
+    };
+    downloadDataUrl(`device-studio-${selectedProfile().id}-sprites.png`, response.atlasDataUrl);
+    downloadText(
+      `device-studio-${selectedProfile().id}-sprites.manifest.json`,
+      `${JSON.stringify(response.manifest, null, 2)}\n`,
+      "application/json",
+    );
+    renderSpriteWorkspace();
+    recordEvent({
+      ...activeSessionContext(),
+      source: "sprite",
+      kind: "sprite.pack",
+      summary: `${spriteState.approved.length} frames`,
+      payload: {
+        profileId: selectedProfile().id,
+        frameCount: spriteState.approved.length,
+      },
+    });
+  } catch (error) {
+    recordEvent({
+      ...activeSessionContext(),
+      source: "sprite",
+      kind: "sprite.pack.failed",
+      summary: error instanceof Error ? error.message : "Pack failed",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    packSpritesButton.disabled = false;
+  }
+}
+
+async function postJson<T>(url: string, payload: unknown): Promise<T> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  const parsed = await response.json() as T;
+  if (!response.ok && typeof parsed === "object" && parsed !== null && "error" in parsed) {
+    return parsed;
+  }
+  return parsed;
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+      } else {
+        reject(new Error("File did not produce a data URL"));
+      }
+    });
+    reader.addEventListener("error", () => reject(reader.error ?? new Error("File read failed")));
+    reader.readAsDataURL(file);
+  });
+}
+
+function downloadDataUrl(filename: string, dataUrl: string): void {
+  const link = document.createElement("a");
+  link.href = dataUrl;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
 }
 
 async function copyEventLog(): Promise<void> {
@@ -745,6 +1745,7 @@ renderProfileOptions();
 profileSelect.addEventListener("change", () => {
   stopActivePlayback("profile changed");
   state.profileId = profileSelect.value;
+  state.selectedFrameIndex = 0;
   state.elapsedMs = 0;
   replaceHubClient();
   ensureSelectedBehavior();
@@ -808,6 +1809,39 @@ importBehaviorFile.addEventListener("change", () => {
 
 exportBehaviorButton.addEventListener("click", () => exportSelectedBehavior());
 
+newBehaviorButton.addEventListener("click", () => createNewBehavior());
+
+duplicateBehaviorButton.addEventListener("click", () => duplicateSelectedBehavior());
+
+deleteBehaviorButton.addEventListener("click", () => deleteSelectedBehavior());
+
+behaviorNameInput.addEventListener("change", () => updateSelectedBehaviorName());
+
+frameSelect.addEventListener("change", () => selectFrame(Number(frameSelect.value)));
+
+addFrameButton.addEventListener("click", () => addBehaviorFrame());
+
+duplicateFrameButton.addEventListener("click", () => duplicateBehaviorFrame());
+
+deleteFrameButton.addEventListener("click", () => deleteBehaviorFrame());
+
+frameTimeInput.addEventListener("change", () => updateFrameTiming());
+frameDurationInput.addEventListener("change", () => updateFrameTiming());
+frameLabelInput.addEventListener("change", () => updateFrameTiming());
+
+expressionIdSelect.addEventListener("change", () => updateFrameExpression());
+expressionEyesSelect.addEventListener("change", () => updateFrameExpression());
+expressionMouthSelect.addEventListener("change", () => updateFrameExpression());
+expressionIntensityInput.addEventListener("input", () => updateFrameExpression());
+
+visemeIdSelect.addEventListener("change", () => updateFrameViseme());
+visemeWeightInput.addEventListener("input", () => updateFrameViseme());
+
+displayModeSelect.addEventListener("change", () => updateFrameDisplay());
+displayBackgroundInput.addEventListener("input", () => updateFrameDisplay());
+displayTextInput.addEventListener("change", () => updateFrameDisplay());
+backlightInput.addEventListener("input", () => updateFrameBacklight());
+
 playButton.addEventListener("click", () => playSelectedBehavior());
 
 stopButton.addEventListener("click", () => stopActivePlayback("user stop"));
@@ -817,6 +1851,22 @@ copyLogButton.addEventListener("click", () => {
 });
 
 exportLogButton.addEventListener("click", () => exportEventLog());
+
+spriteKindSelect.addEventListener("change", () => renderSpriteWorkspace());
+
+generateSpriteButton.addEventListener("click", () => {
+  void generateSpriteCandidate();
+});
+
+importSpriteButton.addEventListener("click", () => spriteImportFile.click());
+
+spriteImportFile.addEventListener("change", () => {
+  void importSpriteFiles();
+});
+
+packSpritesButton.addEventListener("click", () => {
+  void packApprovedSprites();
+});
 
 replaceHubClient();
 render();

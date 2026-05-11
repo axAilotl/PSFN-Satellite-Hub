@@ -79,11 +79,12 @@ button.secondary:hover:not(:disabled) {
 .studio-shell {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 380px;
-  grid-template-rows: auto minmax(440px, 1fr) minmax(240px, auto);
+  grid-template-rows: auto minmax(440px, 1fr) minmax(360px, auto) minmax(320px, auto);
   grid-template-areas:
     "topbar topbar"
     "preview operations"
-    "timeline operations";
+    "timeline operations"
+    "sprites operations";
   gap: 16px;
   width: 100%;
   max-width: 100vw;
@@ -95,7 +96,8 @@ button.secondary:hover:not(:disabled) {
 .topbar,
 .preview-panel,
 .operation-panel,
-.timeline-panel {
+.timeline-panel,
+.sprite-panel {
   min-width: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -254,7 +256,14 @@ button.wide {
 .timeline-panel {
   grid-area: timeline;
   display: grid;
-  grid-template-rows: auto auto minmax(70px, auto);
+  grid-template-rows: auto auto auto minmax(70px, auto);
+  gap: 12px;
+  padding: 16px;
+}
+
+.sprite-panel {
+  grid-area: sprites;
+  display: grid;
   gap: 12px;
   padding: 16px;
 }
@@ -620,6 +629,166 @@ button.wide {
   grid-template-columns: 1fr 1fr;
 }
 
+.authoring-grid,
+.sprite-workspace {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.authoring-grid {
+  grid-template-columns: minmax(220px, 0.58fr) minmax(360px, 1.42fr);
+}
+
+.sprite-workspace {
+  grid-template-columns: minmax(300px, 0.72fr) minmax(320px, 1fr) minmax(260px, 0.8fr);
+}
+
+.editor-block {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.behavior-editor {
+  align-content: start;
+}
+
+.editor-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 0;
+}
+
+.editor-meta dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.editor-meta dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.frame-toolbar {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.frame-field-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.field-wide {
+  grid-column: span 2;
+}
+
+.channel-editor-grid {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.channel-editor-grid:empty,
+.channel-editor-grid[hidden] {
+  display: none;
+}
+
+.channel-row {
+  display: grid;
+  grid-template-columns: minmax(96px, 0.75fr) minmax(130px, 1.25fr) minmax(76px, 0.4fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.channel-row span {
+  color: var(--ink);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.led-row {
+  grid-template-columns: minmax(96px, 0.75fr) 54px minmax(120px, 1fr) minmax(88px, 0.6fr);
+}
+
+.sprite-status {
+  min-height: 32px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: #ffffff;
+  font-size: 0.86rem;
+}
+
+.sprite-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(138px, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.sprite-card-grid.compact {
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+}
+
+.sprite-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.sprite-card[data-approved="true"] {
+  border-color: #7db69f;
+  background: #f3fbf7;
+}
+
+.sprite-card img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: contain;
+  border: 1px solid #d8e0e7;
+  border-radius: 6px;
+  background:
+    linear-gradient(45deg, #edf1f4 25%, transparent 25%),
+    linear-gradient(-45deg, #edf1f4 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #edf1f4 75%),
+    linear-gradient(-45deg, transparent 75%, #edf1f4 75%);
+  background-color: #ffffff;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-size: 16px 16px;
+}
+
+.sprite-card strong,
+.sprite-card span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sprite-card span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .event-log {
   display: grid;
   gap: 8px;
@@ -787,12 +956,13 @@ button.wide {
 @media (max-width: 1180px) {
   .studio-shell {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto auto;
+    grid-template-rows: auto auto auto auto auto;
     grid-template-areas:
       "topbar"
       "operations"
       "preview"
-      "timeline";
+      "timeline"
+      "sprites";
   }
 
   .operation-panel {
@@ -850,7 +1020,8 @@ button.wide {
 
   .preview-panel,
   .operation-panel,
-  .timeline-panel {
+  .timeline-panel,
+  .sprite-panel {
     padding: 10px;
   }
 
@@ -876,5 +1047,30 @@ button.wide {
   .preview-telemetry,
   .preview-joint-list {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1060px) {
+  .authoring-grid,
+  .sprite-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .frame-field-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .frame-toolbar,
+  .frame-field-grid,
+  .editor-meta,
+  .channel-row,
+  .led-row {
+    grid-template-columns: 1fr;
+  }
+
+  .field-wide {
+    grid-column: auto;
   }
 }

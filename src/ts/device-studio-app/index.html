@@ -127,12 +127,124 @@
       <section class="timeline-panel" aria-labelledby="timeline-heading">
         <div class="panel-heading">
           <div>
-            <h2 id="timeline-heading">Behavior Timeline</h2>
+            <h2 id="timeline-heading">Behavior Studio</h2>
           </div>
           <div class="button-row">
+            <button id="new-behavior-button" type="button" class="secondary">New</button>
+            <button id="duplicate-behavior-button" type="button" class="secondary">Duplicate</button>
+            <button id="delete-behavior-button" type="button" class="secondary">Delete</button>
             <button id="play-button" type="button">Play</button>
             <button id="stop-button" type="button" class="secondary">Stop</button>
           </div>
+        </div>
+        <div class="authoring-grid">
+          <section class="editor-block behavior-editor" aria-label="Behavior editor">
+            <label class="field">
+              <span>Name</span>
+              <input id="behavior-name-input" type="text" spellcheck="false">
+            </label>
+            <label class="field">
+              <span>ID</span>
+              <input id="behavior-id-input" type="text" spellcheck="false" readonly>
+            </label>
+            <dl class="editor-meta">
+              <div>
+                <dt>Duration</dt>
+                <dd id="behavior-duration-value">0 ms</dd>
+              </div>
+              <div>
+                <dt>Hardware</dt>
+                <dd id="behavior-hardware-value">simulated-only</dd>
+              </div>
+            </dl>
+          </section>
+          <section class="editor-block frame-editor" aria-label="Frame editor">
+            <div class="frame-toolbar">
+              <label class="field">
+                <span>Frame</span>
+                <select id="frame-select"></select>
+              </label>
+              <div class="button-row">
+                <button id="add-frame-button" type="button" class="secondary">Add</button>
+                <button id="duplicate-frame-button" type="button" class="secondary">Duplicate</button>
+                <button id="delete-frame-button" type="button" class="secondary">Delete</button>
+              </div>
+            </div>
+            <div class="frame-field-grid">
+              <label class="field">
+                <span>Time ms</span>
+                <input id="frame-time-input" type="number" min="0" step="10">
+              </label>
+              <label class="field">
+                <span>Hold ms</span>
+                <input id="frame-duration-input" type="number" min="0" step="10">
+              </label>
+              <label class="field field-wide">
+                <span>Label</span>
+                <input id="frame-label-input" type="text" spellcheck="false">
+              </label>
+              <label class="field">
+                <span>Expression</span>
+                <select id="expression-id-select"></select>
+              </label>
+              <label class="field">
+                <span>Eyes</span>
+                <select id="expression-eyes-select">
+                  <option value="open">open</option>
+                  <option value="closed">closed</option>
+                  <option value="squint">squint</option>
+                  <option value="wink">wink</option>
+                  <option value="wide">wide</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Mouth</span>
+                <select id="expression-mouth-select">
+                  <option value="neutral">neutral</option>
+                  <option value="smile">smile</option>
+                  <option value="laugh">laugh</option>
+                  <option value="frown">frown</option>
+                  <option value="open">open</option>
+                  <option value="sing">sing</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Intensity</span>
+                <input id="expression-intensity-input" type="range" min="0" max="1" step="0.05">
+              </label>
+              <label class="field">
+                <span>Viseme</span>
+                <select id="viseme-id-select"></select>
+              </label>
+              <label class="field">
+                <span>Weight</span>
+                <input id="viseme-weight-input" type="range" min="0" max="1" step="0.05">
+              </label>
+              <label class="field">
+                <span>Display</span>
+                <select id="display-mode-select">
+                  <option value="face">face</option>
+                  <option value="text">text</option>
+                  <option value="image">image</option>
+                  <option value="clear">clear</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Backlight</span>
+                <input id="backlight-input" type="range" min="0" max="1" step="0.05">
+              </label>
+              <label class="field">
+                <span>LCD color</span>
+                <input id="display-background-input" type="color">
+              </label>
+              <label class="field field-wide">
+                <span>Display text</span>
+                <input id="display-text-input" type="text" spellcheck="false">
+              </label>
+            </div>
+            <div id="joint-editor-root" class="channel-editor-grid" aria-label="Joint channels"></div>
+            <div id="led-editor-root" class="channel-editor-grid" aria-label="LED channels"></div>
+          </section>
         </div>
         <div class="behavior-grid" id="behavior-list" aria-label="Behavior library"></div>
         <div class="timeline-track" aria-label="Timeline">
@@ -143,6 +255,68 @@
             <span>1500 ms</span>
           </div>
           <div class="frame-lane" id="frame-lane"></div>
+        </div>
+      </section>
+
+      <section class="sprite-panel" aria-labelledby="sprite-heading">
+        <div class="panel-heading">
+          <div>
+            <h2 id="sprite-heading">Sprite Builder</h2>
+          </div>
+          <div class="button-row">
+            <button id="generate-sprite-button" type="button">Generate</button>
+            <button id="import-sprite-button" type="button" class="secondary">Import PNG</button>
+            <button id="pack-sprites-button" type="button" class="secondary">Pack/Export</button>
+          </div>
+        </div>
+        <div class="sprite-workspace">
+          <section class="editor-block sprite-controls" aria-label="Sprite generation controls">
+            <div class="frame-field-grid">
+              <label class="field">
+                <span>Kind</span>
+                <select id="sprite-kind-select">
+                  <option value="expression">expression</option>
+                  <option value="viseme">viseme</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Target</span>
+                <select id="sprite-target-select"></select>
+              </label>
+              <label class="field">
+                <span>Mode</span>
+                <select id="sprite-mode-select">
+                  <option value="text-to-image">text-to-image</option>
+                  <option value="image-to-image">image-to-image</option>
+                  <option value="edit">edit</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Model</span>
+                <input id="sprite-model-input" type="text" value="fal-ai/nano-banana" spellcheck="false">
+              </label>
+              <label class="field">
+                <span>Seed</span>
+                <input id="sprite-seed-input" type="number" step="1">
+              </label>
+              <label class="field field-wide">
+                <span>Reference URL</span>
+                <input id="sprite-reference-input" type="url" spellcheck="false">
+              </label>
+              <label class="field field-wide">
+                <span>Prompt</span>
+                <textarea id="sprite-prompt-input" rows="3" spellcheck="true">small expressive lcd avatar face, transparent background, crisp pixel-safe shapes</textarea>
+              </label>
+            </div>
+            <input id="sprite-import-file" class="visually-hidden" type="file" accept="image/png" multiple>
+            <output id="sprite-status" class="sprite-status">0 approved frames</output>
+          </section>
+          <section class="editor-block sprite-review" aria-label="Sprite candidates">
+            <div id="sprite-candidate-grid" class="sprite-card-grid"></div>
+          </section>
+          <section class="editor-block sprite-approved" aria-label="Approved sprites">
+            <div id="sprite-approved-grid" class="sprite-card-grid compact"></div>
+          </section>
         </div>
       </section>
     </main>

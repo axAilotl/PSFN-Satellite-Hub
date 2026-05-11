@@ -197,6 +197,17 @@ Run the browser Device Studio scaffold locally:
 npm run studio:dev
 ```
 
+Serve Device Studio on the LAN for a phone, tablet, or hardware bench machine:
+
+```bash
+DEVICE_STUDIO_HOST=0.0.0.0 npm run studio:dev
+```
+
+Device Studio supports mock and live hub transport, behavior import/export,
+server-side sprite generation through `FAL_KEY`, manual sprite packing, and
+hardware verification labels. See [docs/device-studio.md](docs/device-studio.md)
+for the operator workflow and verification checklist.
+
 Send a typed turn through the PSFN channel seam with the text-only thin shell:
 
 ```bash
