@@ -17,8 +17,8 @@
           <label class="field">
             <span>Profile</span>
             <select id="profile-select" name="profile">
-              <option value="stack-chan">Stack-chan bench</option>
-              <option value="waveshare-round">Waveshare round LCD</option>
+              <option value="stackchan.m5stack.cores3.reference">Stack-chan bench</option>
+              <option value="waveshare.esp32-s3-touch-lcd-1.85">Waveshare round LCD</option>
             </select>
           </label>
           <fieldset class="mode-toggle" aria-label="Backend mode">
@@ -48,14 +48,7 @@
           <div class="preview-meta" id="preview-meta">320 x 240 / pan + tilt</div>
         </div>
         <div class="preview-stage" id="preview-stage">
-          <div class="device-stand" aria-hidden="true">
-            <div class="servo-neck"></div>
-            <div class="device-face" id="device-face">
-              <div class="eye left-eye"></div>
-              <div class="eye right-eye"></div>
-              <div class="mouth" id="device-mouth"></div>
-            </div>
-          </div>
+          <div id="stackchan-preview-root" role="img"></div>
           <aside class="preview-state" aria-label="Preview state">
             <dl>
               <div>
@@ -69,6 +62,14 @@
               <div>
                 <dt>Motion</dt>
                 <dd id="motion-value">Pan 0 / Tilt 0</dd>
+              </div>
+              <div>
+                <dt>Hardware</dt>
+                <dd id="hardware-value">Unverified</dd>
+              </div>
+              <div>
+                <dt>Frame</dt>
+                <dd id="frame-value">0 ms</dd>
               </div>
             </dl>
           </aside>
