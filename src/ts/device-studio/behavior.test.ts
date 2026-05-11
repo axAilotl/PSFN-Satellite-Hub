@@ -155,9 +155,9 @@ test("sampling step-holds semantic channels and interpolates joint movement", ()
   assert.equal(halfway.nextFrame?.atMs, 250);
   assert.equal(halfway.expression?.id, "happy");
   assert.equal(halfway.display?.backgroundColor, "#172033");
-  assert.equal(halfway.leds.status_rgb?.effect, "pulse");
-  assert.equal(halfway.joints.neck_yaw?.value, 1);
-  assert.equal(halfway.joints.neck_pitch?.value, -1);
+  assert.equal(halfway.leds["status.rgb"]?.effect, "pulse");
+  assert.equal(halfway.joints["head.yaw"]?.value, 1);
+  assert.equal(halfway.joints["head.pitch"]?.value, -1);
 
   const betweenSingFrames = sampleBehaviorRenderState(danceSingAlongBehavior, 375, {
     profile: fixtureMotionDisplayProfile,
@@ -166,17 +166,17 @@ test("sampling step-holds semantic channels and interpolates joint movement", ()
   assert.equal(betweenSingFrames.activeFrame?.atMs, 250);
   assert.equal(betweenSingFrames.expression?.id, "singing");
   assert.equal(betweenSingFrames.viseme?.id, "oh");
-  assert.equal(betweenSingFrames.leds.status_rgb?.effect, "pulse");
-  assert.equal(betweenSingFrames.joints.neck_yaw?.value, -1);
-  assert.equal(betweenSingFrames.joints.neck_pitch?.value, 1);
+  assert.equal(betweenSingFrames.leds["status.rgb"]?.effect, "pulse");
+  assert.equal(betweenSingFrames.joints["head.yaw"]?.value, -1);
+  assert.equal(betweenSingFrames.joints["head.pitch"]?.value, 1);
 
   const afterLastJointKeyframe = sampleBehaviorRenderState(danceSingAlongBehavior, 1100, {
     profile: fixtureMotionDisplayProfile,
   });
 
   assert.equal(afterLastJointKeyframe.activeFrame?.label, "finish");
-  assert.equal(afterLastJointKeyframe.joints.neck_yaw?.value, 0);
-  assert.equal(afterLastJointKeyframe.joints.neck_pitch?.value, 0);
+  assert.equal(afterLastJointKeyframe.joints["head.yaw"]?.value, 0);
+  assert.equal(afterLastJointKeyframe.joints["head.pitch"]?.value, 0);
   assert.equal(afterLastJointKeyframe.complete, false);
 });
 

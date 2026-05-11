@@ -100,10 +100,10 @@ const UNVERIFIED_MODEL_INTAKE: HardwareVerification = {
 const HOST_GENERATED_MODEL_PROVENANCE: Provenance = {
   label: "Host-generated Stack-chan model intake manifest",
   source: "host-generated",
-  url: "https://docs.m5stack.com/en/stackchan",
+  url: "https://github.com/stack-chan/stack-chan/tree/10991598b93f573c0fee88c6be0f004f2e3a8ddb/case/v1",
   notes: [
-    "The repo checkout does not include the DIY Stack-chan STL/GLB asset.",
-    "This manifest defines the canonical intake path and deterministic fallback geometry for Device Studio preview work.",
+    "Stack-chan case v1 STL source assets are recorded from the upstream Apache-2.0 stack-chan/stack-chan repository.",
+    "This manifest defines the servo pivot hierarchy used by Device Studio preview work.",
   ].join(" "),
 };
 
@@ -115,18 +115,53 @@ export const stackChanModelManifest: StackChanModelManifest = {
   assetRoot: STACKCHAN_ASSET_ROOT,
   outputRoot: STACKCHAN_OUTPUT_ROOT,
   source: {
-    expectedVendorAsset: `${STACKCHAN_ASSET_ROOT}/source/diy-stack-chan-case.stl`,
-    license: "pending-source-intake",
-    status: "source-missing",
-    notes: "Place the original DIY Stack-chan case STL here when license/provenance is recorded. Do not commit large converted binaries unless repo policy allows it.",
+    expectedVendorAsset: `${STACKCHAN_ASSET_ROOT}/source/shell.stl`,
+    license: "Apache-2.0",
+    status: "source-present",
+    notes: "Stack-chan case v1 STL source assets are recorded under source/ with upstream commit and license provenance.",
   },
   paths: [
     {
       format: "stl",
-      path: `${STACKCHAN_ASSET_ROOT}/source/diy-stack-chan-case.stl`,
+      path: `${STACKCHAN_ASSET_ROOT}/source/shell.stl`,
       role: "source",
-      presence: "expected",
-      notes: "Raw vendor/community STL intake location.",
+      presence: "available",
+      notes: "Stack-chan case v1 shell STL from upstream stack-chan/stack-chan.",
+    },
+    {
+      format: "stl",
+      path: `${STACKCHAN_ASSET_ROOT}/source/feet_top.stl`,
+      role: "source",
+      presence: "available",
+      notes: "Stack-chan case v1 feet top STL from upstream stack-chan/stack-chan.",
+    },
+    {
+      format: "stl",
+      path: `${STACKCHAN_ASSET_ROOT}/source/feet_bottom.stl`,
+      role: "source",
+      presence: "available",
+      notes: "Stack-chan case v1 feet bottom STL from upstream stack-chan/stack-chan.",
+    },
+    {
+      format: "stl",
+      path: `${STACKCHAN_ASSET_ROOT}/source/bracket_XL330_f.stl`,
+      role: "source",
+      presence: "available",
+      notes: "Stack-chan case v1 front XL330 bracket STL from upstream stack-chan/stack-chan.",
+    },
+    {
+      format: "stl",
+      path: `${STACKCHAN_ASSET_ROOT}/source/bracket_XL330_b.stl`,
+      role: "source",
+      presence: "available",
+      notes: "Stack-chan case v1 rear XL330 bracket STL from upstream stack-chan/stack-chan.",
+    },
+    {
+      format: "stl",
+      path: `${STACKCHAN_ASSET_ROOT}/source/horn.stl`,
+      role: "source",
+      presence: "available",
+      notes: "Stack-chan case v1 horn STL from upstream stack-chan/stack-chan.",
     },
     {
       format: "glb",

@@ -12,10 +12,13 @@ test("Stack-chan model manifest defines canonical intake and generated preview p
   assert.equal(stackChanModelManifest.profileId, stackChanProfile.id);
   assert.equal(stackChanModelManifest.assetRoot, "assets/device-studio/stackchan");
   assert.equal(stackChanModelManifest.outputRoot, "dist/device-studio/assets/stackchan");
-  assert.equal(stackChanModelManifest.source.status, "source-missing");
-  assert.match(stackChanModelManifest.source.expectedVendorAsset, /source\/diy-stack-chan-case\.stl$/);
+  assert.equal(stackChanModelManifest.source.status, "source-present");
+  assert.equal(stackChanModelManifest.source.license, "Apache-2.0");
+  assert.match(stackChanModelManifest.source.expectedVendorAsset, /source\/shell\.stl$/);
 
   assert(stackChanModelManifest.paths.some((path) => path.role === "source" && path.format === "stl"));
+  assert(stackChanModelManifest.paths.some((path) => path.path.endsWith("feet_top.stl")));
+  assert(stackChanModelManifest.paths.some((path) => path.path.endsWith("horn.stl")));
   assert(stackChanModelManifest.paths.some((path) => path.role === "normalized" && path.format === "glb"));
 });
 

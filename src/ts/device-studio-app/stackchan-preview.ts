@@ -1,3 +1,5 @@
+import { StackChanThreePreview } from "./stackchan-three-preview.js";
+
 type PreviewHardwareStatus =
   | "verified-on-hardware"
   | "partially-verified"
@@ -134,45 +136,36 @@ const PITCH_ALIASES = ["head.pitch", "neck_pitch", "neck.pitch", "tilt"];
 
 export class StackChanPreview {
   private readonly root: HTMLElement;
-  private readonly head: HTMLElement;
-  private readonly screen: HTMLElement;
-  private readonly leftEye: HTMLElement;
-  private readonly rightEye: HTMLElement;
-  private readonly mouth: HTMLElement;
+  private readonly threeHost: HTMLElement;
+  private readonly threePreview?: StackChanThreePreview;
+  private readonly renderError?: HTMLElement;
   private readonly statusBadge: HTMLElement;
   private readonly warningList: HTMLElement;
   private readonly jointList: HTMLElement;
   private readonly progressFill: HTMLElement;
   private readonly elapsedValue: HTMLElement;
   private readonly poseValue: HTMLElement;
-  private readonly ledNodes: HTMLElement[];
 
   constructor(root: HTMLElement) {
     this.root = root;
     const document = root.ownerDocument;
 
-    const scene = createElement(document, "div", "stackchan-scene");
-    const rig = createElement(document, "div", "stackchan-rig");
-    this.head = createElement(document, "div", "stackchan-head");
-    this.screen = createElement(document, "div", "stackchan-screen");
-    const face = createElement(document, "div", "stackchan-face");
-    this.leftEye = createElement(document, "div", "stackchan-eye stackchan-eye-left");
-    this.rightEye = createElement(document, "div", "stackchan-eye stackchan-eye-right");
-    this.mouth = createElement(document, "div", "stackchan-mouth");
-    const neck = createElement(document, "div", "stackchan-neck");
-    const body = createElement(document, "div", "stackchan-body");
-    const bodyPanel = createElement(document, "div", "stackchan-body-panel");
-    const ledStrip = createElement(document, "div", "stackchan-led-strip");
-    this.ledNodes = Array.from({ length: 5 }, () => createElement(document, "span", "stackchan-led"));
-
-    face.append(this.leftEye, this.rightEye, this.mouth);
-    this.screen.append(face);
-    this.head.append(this.screen);
-    ledStrip.append(...this.ledNodes);
-    bodyPanel.append(ledStrip);
-    body.append(bodyPanel);
-    rig.append(this.head, neck, body);
-    scene.append(rig);
+    this.threeHost = createElement(document, "div", "stackchan-three-host");
+    let threePreview: StackChanThreePreview | undefined;
+    let renderError: HTMLElement | undefined;
+    try {
+      threePreview = new StackChanThreePreview(this.threeHost);
+      root.dataset.renderer = "three";
+    } catch (error) {
+      renderError = createElement(document, "div", "stackchan-render-error");
+      renderError.textContent = error instanceof Error
+        ? `WebGL required for Stack-chan physical simulation: ${error.message}`
+        : "WebGL required for Stack-chan physical simulation";
+      this.threeHost.replaceChildren(renderError);
+      root.dataset.renderer = "webgl-required";
+    }
+    this.threePreview = threePreview;
+    this.renderError = renderError;
 
     const telemetry = createElement(document, "div", "preview-telemetry");
     this.statusBadge = createElement(document, "div", "preview-hardware-badge");
@@ -187,7 +180,7 @@ export class StackChanPreview {
     this.jointList = createElement(document, "div", "preview-joint-list");
 
     root.classList.add("stackchan-preview-root");
-    root.replaceChildren(scene, telemetry, this.warningList, this.jointList);
+    root.replaceChildren(this.threeHost, telemetry, this.warningList, this.jointList);
   }
 
   update(profile: StackChanPreviewProfile, renderState: StackChanPreviewRenderState): StackChanPreviewModel {
@@ -207,22 +200,15 @@ export class StackChanPreview {
       `${model.behaviorName}: yaw ${model.yawDegrees}, pitch ${model.pitchDegrees}, ${model.hardwareLabel}`,
     );
 
-    this.head.style.setProperty("--preview-yaw", `${model.yawDegrees}deg`);
-    this.head.style.setProperty("--preview-pitch", `${model.pitchDegrees}deg`);
-    this.screen.style.setProperty("--preview-screen", model.screenBackground);
-    this.leftEye.dataset.mode = model.leftEyeMode;
-    this.rightEye.dataset.mode = model.rightEyeMode;
-    this.mouth.dataset.mode = model.mouthMode;
+    this.threePreview?.update(model);
+    if (this.renderError) {
+      this.renderError.textContent = `WebGL required for Stack-chan physical simulation. Pose requested: yaw ${formatDegrees(model.yawDegrees)}, pitch ${formatDegrees(model.pitchDegrees)}.`;
+    }
 
     this.statusBadge.textContent = model.hardwareLabel;
     this.poseValue.textContent = `Yaw ${formatDegrees(model.yawDegrees)} / Pitch ${formatDegrees(model.pitchDegrees)}`;
     this.elapsedValue.textContent = `${model.elapsedLabel} / ${model.frameLabel}`;
     this.progressFill.style.width = `${model.progressPercent}%`;
-
-    for (const led of this.ledNodes) {
-      led.style.setProperty("--preview-led", model.ledColor);
-      led.dataset.effect = model.ledEffect;
-    }
 
     this.warningList.replaceChildren(
       ...model.warnings.map((warning) => {

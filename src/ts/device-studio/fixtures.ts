@@ -49,8 +49,8 @@ export const fixtureMotionDisplayProfile: DeviceProfile = {
   },
   joints: [
     {
-      id: "neck_yaw",
-      name: "Neck yaw",
+      id: "head.yaw",
+      name: "Head yaw",
       axis: "yaw",
       unit: "degrees",
       min: -35,
@@ -59,8 +59,8 @@ export const fixtureMotionDisplayProfile: DeviceProfile = {
       hardwareVerification: UNVERIFIED_HARDWARE,
     },
     {
-      id: "neck_pitch",
-      name: "Neck pitch",
+      id: "head.pitch",
+      name: "Head pitch",
       axis: "pitch",
       unit: "degrees",
       min: -20,
@@ -71,7 +71,7 @@ export const fixtureMotionDisplayProfile: DeviceProfile = {
   ],
   leds: [
     {
-      id: "status_rgb",
+      id: "status.rgb",
       name: "Status RGB LED",
       kind: "rgb",
       count: 1,
@@ -188,7 +188,7 @@ export const happyLaughingBehavior: BehaviorTimeline = {
         brightness: 0.85,
       },
       leds: {
-        status_rgb: {
+        "status.rgb": {
           color: "#42F57B",
           brightness: 0.8,
           effect: "pulse",
@@ -254,7 +254,7 @@ export const angryBehavior: BehaviorTimeline = {
         brightness: 0.55,
       },
       leds: {
-        status_rgb: {
+        "status.rgb": {
           color: "#FF2F2F",
           brightness: 1,
           effect: "solid",
@@ -287,8 +287,8 @@ export const danceSingAlongBehavior: BehaviorTimeline = {
         weight: 1,
       },
       joints: {
-        neck_yaw: { value: -12 },
-        neck_pitch: { value: 4 },
+        "head.yaw": { value: -12 },
+        "head.pitch": { value: 4 },
       },
       display: {
         mode: "face",
@@ -298,7 +298,7 @@ export const danceSingAlongBehavior: BehaviorTimeline = {
         brightness: 0.75,
       },
       leds: {
-        status_rgb: {
+        "status.rgb": {
           color: "#52B6FF",
           brightness: 0.7,
           effect: "pulse",
@@ -319,8 +319,8 @@ export const danceSingAlongBehavior: BehaviorTimeline = {
         weight: 0.8,
       },
       joints: {
-        neck_yaw: { value: 14 },
-        neck_pitch: { value: -6 },
+        "head.yaw": { value: 14 },
+        "head.pitch": { value: -6 },
       },
     },
     {
@@ -337,11 +337,11 @@ export const danceSingAlongBehavior: BehaviorTimeline = {
         weight: 0.75,
       },
       joints: {
-        neck_yaw: { value: -16 },
-        neck_pitch: { value: 8 },
+        "head.yaw": { value: -16 },
+        "head.pitch": { value: 8 },
       },
       leds: {
-        status_rgb: {
+        "status.rgb": {
           color: "#FFDD4A",
           brightness: 0.9,
           effect: "blink",
@@ -362,8 +362,8 @@ export const danceSingAlongBehavior: BehaviorTimeline = {
         weight: 1,
       },
       joints: {
-        neck_yaw: { value: 0 },
-        neck_pitch: { value: -12 },
+        "head.yaw": { value: 0 },
+        "head.pitch": { value: -12 },
       },
       backlight: {
         brightness: 1,
@@ -384,11 +384,11 @@ export const danceSingAlongBehavior: BehaviorTimeline = {
         weight: 1,
       },
       joints: {
-        neck_yaw: { value: 0 },
-        neck_pitch: { value: 0 },
+        "head.yaw": { value: 0 },
+        "head.pitch": { value: 0 },
       },
       leds: {
-        status_rgb: {
+        "status.rgb": {
           color: "#42F57B",
           brightness: 0.6,
           effect: "solid",

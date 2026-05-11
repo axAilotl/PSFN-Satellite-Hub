@@ -71,7 +71,7 @@ Device Studio browser app
   -> profile registry
   -> behavior timeline engine
   -> preview renderers
-       Stack-chan 3D or simplified pose preview
+       Stack-chan Three.js physical pan/tilt preview
        2D LCD avatar preview for square/round screens
   -> transport adapter
        live websocket adapter to PSFN Satellite Hub
@@ -190,7 +190,7 @@ Profile fields should include:
   clamp behavior
 - LED and backlight channels
 - realtime hub capabilities advertised in `hello`
-- renderer hints for 2D LCD, Stack-chan pose preview, or future 3D renderers
+- renderer hints for 2D LCD or Stack-chan Three.js pan/tilt preview
 - provenance and hardware verification state
 
 Representative profile shape:
@@ -357,7 +357,8 @@ required for the first live websocket integration.
 
 Renderers map semantic expression and viseme IDs into concrete visuals:
 
-- Stack-chan preview maps them to face sprites, mesh state, or a simplified face.
+- Stack-chan preview maps them to the screen/face surfaces carried by the 3D
+  pan/tilt rig.
 - Round LCD preview maps them to clipped 2D screen graphics.
 - Firmware export maps them to sprite sheets, RGB565 data, or embedded behavior
   tables in a later pipeline.
@@ -367,24 +368,27 @@ Renderers map semantic expression and viseme IDs into concrete visuals:
 The Stack-chan physical preview uses a manifest before it uses a CAD file. The
 repo-local manifest lives in `src/ts/device-studio/assets.ts` and defines:
 
-- canonical source path: `assets/device-studio/stackchan/source/diy-stack-chan-case.stl`
+- canonical source path: `assets/device-studio/stackchan/source/shell.stl`
 - generated browser-preview path: `dist/device-studio/assets/stackchan/stackchan-preview.glb`
 - generated preview manifest path:
   `dist/device-studio/assets/stackchan/stackchan-preview.manifest.json`
 - coordinate system: right-handed, millimeters, Y up, Z forward
 - semantic model parts for body, head, display, neck, and LEDs
 - pivot mappings for `head.yaw` and `head.pitch`
-- deterministic fallback primitives for the Three.js renderer when no STL/GLB is
-  available
+- source STL files for the case shell, feet, XL330 brackets, and horn
 
-The current checkout does not include the DIY Stack-chan STL. Place the source
-asset under the canonical source path only after recording its source, license,
-and provenance. Large generated binaries should stay generated/ignored unless
-the repo intentionally decides to store them.
+The current checkout includes the small Stack-chan case v1 STL source assets
+from `stack-chan/stack-chan` under `assets/device-studio/stackchan/source/`,
+with upstream commit and Apache-2.0 license provenance in `UPSTREAM.txt`.
+Generated GLB or processed preview outputs should stay generated unless the repo
+intentionally decides to store them.
 
-Fallback geometry is simulator metadata. It is useful for previewing motion, but
-it is not CAD-accurate and must remain `unverified` until a real unit confirms
-the pivots and movement range.
+The Three.js preview requires these STL assets. There is no CSS stand-in for
+Stack-chan motion. The feet stay fixed, the yaw group carries the upper
+brackets/neck around the pan axis, and the pitch group carries the shell,
+horn, display, expression, and viseme surfaces around the face-side tilt axis.
+The current pivot numbers are still simulator metadata and must remain
+`unverified` until a real unit confirms the pivots and movement range.
 
 ## Sprite Source Generation and Packing
 
@@ -635,7 +639,8 @@ Device Studio without consulting the original screenshot or chat context:
 - live websocket adapter for `hello`, typed turns, interrupts, message events,
   audio lifecycle markers, and structured errors
 - profile-aware preview for screen/expression/viseme state
-- Stack-chan movement visualization sufficient to inspect yaw/pitch behavior
+- Stack-chan Three.js preview sufficient to inspect yaw/pitch behavior against
+  the STL-mounted physical rig
 - behavior library and timeline frame playback
 - import/export of behavior JSON
 - command/event log with source, provenance, and verification labels
@@ -650,7 +655,7 @@ Device Studio should not attempt to:
 - become a required production hub service
 - change hub startup behavior for existing clients
 - certify motion safety without hardware intake
-- provide CAD-accurate physical simulation for the first Stack-chan preview
+- certify CAD pivots or motion safety without physical unit calibration
 - require paid STT/TTS/provider credentials for mock mode
 - store project work tracking outside bd
 
