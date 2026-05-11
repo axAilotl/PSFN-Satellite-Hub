@@ -82,6 +82,10 @@ function readString(value) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function readStringArray(value) {
+  return Array.isArray(value) ? value.map(readString).filter(Boolean) : [];
+}
+
 function requestMethodNotAllowed(res) {
   res.writeHead(405, {
     "content-type": "application/json; charset=utf-8",
@@ -143,13 +147,16 @@ async function handleSpriteGenerate(req, res) {
   try {
     const { FalImageProvider } = await import(moduleUrl("dist", "ts", "device-studio", "fal-provider.js"));
     const provider = new FalImageProvider({ apiKey: process.env.FAL_KEY });
+    const imageInputs = mode === "text-to-image" ? {
+      imageUrl: body.imageUrl,
+      imageUrls: body.imageUrls,
+    } : await normalizeFalImageInputs(body);
     const request = {
       modelId: body.modelId,
       prompt: body.prompt,
       seed: body.seed,
       options: body.options,
-      imageUrl: body.imageUrl,
-      imageUrls: body.imageUrls,
+      ...imageInputs,
       provenance: body.provenance,
     };
     const result = mode === "text-to-image"
@@ -171,6 +178,53 @@ async function handleSpriteGenerate(req, res) {
     }
     sendError(res, 502, "fal_error", message);
   }
+}
+
+async function normalizeFalImageInputs(body) {
+  const imageInputs = [
+    ...(readString(body.imageUrl) ? [readString(body.imageUrl)] : []),
+    ...readStringArray(body.imageUrls),
+  ];
+  const normalized = await Promise.all(imageInputs.map((value, index) => (
+    value.startsWith("data:") ? uploadFalDataUrl(value, index) : value
+  )));
+  if (normalized.length === 1) {
+    return { imageUrl: normalized[0] };
+  }
+  if (normalized.length > 1) {
+    return { imageUrls: normalized };
+  }
+  return {};
+}
+
+async function uploadFalDataUrl(value, index) {
+  const { mediaType, bytes } = decodeImageDataUrl(value);
+  const { fal } = await import("@fal-ai/client");
+  fal.config({ credentials: process.env.FAL_KEY });
+  const blob = new Blob([bytes], { type: mediaType });
+  const extension = mediaType.split("/")[1]?.replace("jpeg", "jpg") || "png";
+  const file = new File([blob], `device-studio-reference-${Date.now()}-${index}.${extension}`, { type: mediaType });
+  return fal.storage.upload(file, { lifecycle: { expiresIn: 60 * 60 * 6 } });
+}
+
+function decodeImageDataUrl(value) {
+  const dataUrlMatch = /^data:([^;,]+)?(;base64)?,(.*)$/is.exec(value);
+  if (!dataUrlMatch) {
+    throw new Error("Reference upload must be a data URL or a URL");
+  }
+  const mediaType = (dataUrlMatch[1] || "application/octet-stream").toLowerCase();
+  if (!mediaType.startsWith("image/")) {
+    throw new Error(`Reference upload must be an image, received ${mediaType}`);
+  }
+  const isBase64 = Boolean(dataUrlMatch[2]);
+  const payload = dataUrlMatch[3] ?? "";
+  const bytes = isBase64
+    ? Buffer.from(payload.replace(/\s+/g, ""), "base64")
+    : Buffer.from(decodeURIComponent(payload), "utf8");
+  if (bytes.byteLength === 0) {
+    throw new Error("Reference upload is empty");
+  }
+  return { mediaType, bytes };
 }
 
 async function attachGeneratedImageDataUrls(result) {

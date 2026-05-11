@@ -109,14 +109,19 @@ FAL_KEY=<set-in-shell-or-env-file> npm run studio:dev
 The review workflow is:
 
 1. Choose the target profile and the expression or viseme frame to fill.
-2. Request generated candidates through the server-side provider, or import
-   local/cached PNG candidates manually.
-3. Review candidates in the sprite workspace. Keep generated candidates marked
+2. Upload optional reference images or enter a reference URL when the generation
+   mode is image-to-image or edit. Uploaded references are preview inputs only;
+   they are not assigned to an expression or viseme.
+3. Request generated frame candidates or generated sprite sheets through the
+   server-side provider, or import local/cached frame or sheet images manually.
+4. Review candidates in the sprite workspace. Keep generated candidates marked
    as host-generated until a human approves them for a named expression or
    viseme.
-4. Approve one source frame per required expression or viseme ID. Rejected
+5. Slice imported or generated sprite sheets by row/column count and target
+   list. Sheet targets accept `expression:<id>` and `viseme:<id>` entries.
+6. Approve one source frame per required expression or viseme ID. Rejected
    candidates should remain out of the firmware pack.
-5. Pack/export the approved frames into a PNG atlas plus JSON manifest. The
+7. Pack/export the approved frames into a PNG atlas plus JSON manifest. The
    manifest records profile display metadata, safe area or round clipping,
    atlas rectangles, source provenance, and content hashes.
 
@@ -575,6 +580,13 @@ packer produces a PNG atlas plus JSON manifest that records frame IDs,
 expression/viseme kind, source provenance, profile display size, safe area or
 round clipping metadata, atlas rectangles, and a content hash. Firmware exports
 must be reproducible without network calls.
+
+Browser reference uploads are sent to the local studio server as data URLs. The
+server owns `FAL_KEY`, uploads those references to fal storage, and forwards the
+resulting URLs to image-to-image or edit models. Frame imports are separate from
+references: imported frames are assigned only to the currently selected
+expression or viseme target, while imported sheets are sliced by the row/column
+and target controls.
 
 The headless CLI packs local PNG frames after TypeScript compilation:
 

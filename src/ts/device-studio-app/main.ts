@@ -63,11 +63,15 @@ interface StudioState {
   elapsedMs: number;
 }
 
+type SpriteFrameKind = "expression" | "viseme";
+type SpriteFrameSource = "generated" | "manual" | "sheet";
+type SpriteOutputMode = "frame" | "sheet";
+
 interface SpriteCandidate {
   localId: string;
-  kind: "expression" | "viseme";
+  kind: SpriteFrameKind;
   id: string;
-  source: "generated" | "manual";
+  source: SpriteFrameSource;
   dataUrl?: string;
   url?: string;
   prompt?: string;
@@ -76,10 +80,29 @@ interface SpriteCandidate {
 }
 
 interface ApprovedSpriteFrame {
-  kind: "expression" | "viseme";
+  kind: SpriteFrameKind;
   id: string;
   dataUrl: string;
+  source: SpriteFrameSource;
+  prompt?: string;
+  modelId?: string;
+  generatedAt?: string;
+}
+
+interface SpriteReferenceImage {
+  localId: string;
+  name: string;
+  dataUrl: string;
+  mimeType: string;
+  sizeBytes: number;
+}
+
+interface SpriteSheetCandidate {
+  localId: string;
+  name: string;
   source: "generated" | "manual";
+  dataUrl?: string;
+  url?: string;
   prompt?: string;
   modelId?: string;
   generatedAt?: string;
@@ -106,10 +129,14 @@ const state: StudioState = {
 };
 
 const spriteState: {
+  references: SpriteReferenceImage[];
+  sheets: SpriteSheetCandidate[];
   candidates: SpriteCandidate[];
   approved: ApprovedSpriteFrame[];
   lastPack?: SpritePackResult;
 } = {
+  references: [],
+  sheets: [],
   candidates: [],
   approved: [],
 };
@@ -121,6 +148,7 @@ let activePlayback: BehaviorPlayback | null = null;
 let animationFrameId: number | undefined;
 let playbackStartedAt = 0;
 let lastStackChanModel: StackChanPreviewModel | undefined;
+let lastSheetTargetsTemplate = "";
 const operationalLog = new DeviceStudioAppEventLog();
 
 function requireElement<T extends HTMLElement>(id: string, type: { new(): T }): T {
@@ -195,6 +223,7 @@ const playButton = requireElement("play-button", HTMLButtonElement);
 const stopButton = requireElement("stop-button", HTMLButtonElement);
 const copyLogButton = requireElement("copy-log-button", HTMLButtonElement);
 const exportLogButton = requireElement("export-log-button", HTMLButtonElement);
+const spriteOutputSelect = requireElement("sprite-output-select", HTMLSelectElement);
 const spriteKindSelect = requireElement("sprite-kind-select", HTMLSelectElement);
 const spriteTargetSelect = requireElement("sprite-target-select", HTMLSelectElement);
 const spriteModeSelect = requireElement("sprite-mode-select", HTMLSelectElement);
@@ -202,11 +231,21 @@ const spriteModelInput = requireElement("sprite-model-input", HTMLInputElement);
 const spriteSeedInput = requireElement("sprite-seed-input", HTMLInputElement);
 const spriteReferenceInput = requireElement("sprite-reference-input", HTMLInputElement);
 const spritePromptInput = requireElement("sprite-prompt-input", HTMLTextAreaElement);
+const spriteSheetRowsInput = requireElement("sprite-sheet-rows-input", HTMLInputElement);
+const spriteSheetColsInput = requireElement("sprite-sheet-cols-input", HTMLInputElement);
+const spriteSheetTargetsInput = requireElement("sprite-sheet-targets-input", HTMLTextAreaElement);
 const generateSpriteButton = requireElement("generate-sprite-button", HTMLButtonElement);
 const importSpriteButton = requireElement("import-sprite-button", HTMLButtonElement);
+const importSpriteSheetButton = requireElement("import-sprite-sheet-button", HTMLButtonElement);
+const uploadSpriteReferenceButton = requireElement("upload-sprite-reference-button", HTMLButtonElement);
+const clearSpriteReferencesButton = requireElement("clear-sprite-references-button", HTMLButtonElement);
 const packSpritesButton = requireElement("pack-sprites-button", HTMLButtonElement);
+const spriteReferenceFile = requireElement("sprite-reference-file", HTMLInputElement);
 const spriteImportFile = requireElement("sprite-import-file", HTMLInputElement);
+const spriteSheetFile = requireElement("sprite-sheet-file", HTMLInputElement);
 const spriteStatus = requireElement("sprite-status", HTMLOutputElement);
+const spriteReferenceGrid = requireElement("sprite-reference-grid", HTMLDivElement);
+const spriteSheetGrid = requireElement("sprite-sheet-grid", HTMLDivElement);
 const spriteCandidateGrid = requireElement("sprite-candidate-grid", HTMLDivElement);
 const spriteApprovedGrid = requireElement("sprite-approved-grid", HTMLDivElement);
 
@@ -1346,12 +1385,28 @@ async function importBehaviorFileSelection(): Promise<void> {
 
 function renderSpriteWorkspace(): void {
   const profile = selectedProfile();
-  const kind: SpriteCandidate["kind"] = spriteKindSelect.value === "viseme" ? "viseme" : "expression";
-  const targets = kind === "expression" ? profile.face.expressions : profile.face.visemes;
+  const kind = selectedSpriteKind();
+  const targets = selectedSpriteTargets(profile);
   renderOptionSelect(spriteTargetSelect, targets, targets.includes(spriteTargetSelect.value) ? spriteTargetSelect.value : targets[0] ?? "neutral");
-  spriteStatus.value = `${spriteState.approved.length} approved frames`;
+  const nextSheetTargetsTemplate = createDefaultSheetTargetText(kind, targets);
+  if (!spriteSheetTargetsInput.value.trim() || spriteSheetTargetsInput.value === lastSheetTargetsTemplate) {
+    spriteSheetTargetsInput.value = nextSheetTargetsTemplate;
+  }
+  lastSheetTargetsTemplate = nextSheetTargetsTemplate;
+
+  const output = selectedSpriteOutput();
+  generateSpriteButton.textContent = output === "sheet" ? "Generate Sheet" : "Generate Frame";
+  clearSpriteReferencesButton.disabled = spriteState.references.length === 0;
+  spriteStatus.value = [
+    `${spriteState.approved.length} approved`,
+    `${spriteState.candidates.length} frame candidates`,
+    `${spriteState.sheets.length} sheets`,
+    `${spriteState.references.length} references`,
+  ].join(" / ");
   packSpritesButton.disabled = spriteState.approved.length === 0;
 
+  spriteReferenceGrid.replaceChildren(...spriteState.references.map(createSpriteReferenceCard));
+  spriteSheetGrid.replaceChildren(...spriteState.sheets.map(createSpriteSheetCard));
   spriteCandidateGrid.replaceChildren(...spriteState.candidates.map((candidate) => createSpriteCard(candidate, false)));
   spriteApprovedGrid.replaceChildren(
     ...spriteState.approved.map((frame) => createSpriteCard({
@@ -1366,6 +1421,86 @@ function renderSpriteWorkspace(): void {
     }, true)),
     ...(spriteState.lastPack ? [createPackResultCard(spriteState.lastPack)] : []),
   );
+}
+
+function selectedSpriteKind(): SpriteFrameKind {
+  return spriteKindSelect.value === "viseme" ? "viseme" : "expression";
+}
+
+function selectedSpriteOutput(): SpriteOutputMode {
+  return spriteOutputSelect.value === "sheet" ? "sheet" : "frame";
+}
+
+function selectedSpriteTargets(profile = selectedProfile()): readonly string[] {
+  return selectedSpriteKind() === "expression" ? profile.face.expressions : profile.face.visemes;
+}
+
+function createDefaultSheetTargetText(kind: SpriteFrameKind, targets: readonly string[]): string {
+  return targets.slice(0, 12).map((target) => `${kind}:${target}`).join("\n");
+}
+
+function createSpriteReferenceCard(reference: SpriteReferenceImage): HTMLElement {
+  const card = document.createElement("article");
+  card.className = "sprite-card reference-card";
+
+  const image = document.createElement("img");
+  image.alt = reference.name;
+  image.src = reference.dataUrl;
+
+  const title = document.createElement("strong");
+  title.textContent = reference.name;
+  const meta = document.createElement("span");
+  meta.textContent = `${reference.mimeType} / ${formatBytes(reference.sizeBytes)}`;
+
+  const actions = document.createElement("div");
+  actions.className = "button-row compact-buttons";
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "secondary";
+  remove.textContent = "Remove";
+  remove.addEventListener("click", () => removeSpriteReference(reference.localId));
+  actions.append(remove);
+
+  card.append(image, title, meta, actions);
+  return card;
+}
+
+function createSpriteSheetCard(sheet: SpriteSheetCandidate): HTMLElement {
+  const card = document.createElement("article");
+  card.className = "sprite-card sprite-sheet-card";
+
+  const image = document.createElement("img");
+  image.alt = sheet.name;
+  image.src = sheet.dataUrl ?? sheet.url ?? "";
+
+  const title = document.createElement("strong");
+  title.textContent = sheet.name;
+  const meta = document.createElement("span");
+  meta.textContent = [
+    "sprite sheet",
+    sheet.source,
+    sheet.modelId,
+    sheet.dataUrl ? "slice-ready" : "review-only",
+  ].filter(Boolean).join(" / ");
+
+  const actions = document.createElement("div");
+  actions.className = "button-row compact-buttons";
+  const slice = document.createElement("button");
+  slice.type = "button";
+  slice.textContent = "Slice";
+  slice.disabled = !sheet.dataUrl;
+  slice.addEventListener("click", () => {
+    void sliceSpriteSheet(sheet.localId);
+  });
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "secondary";
+  remove.textContent = "Remove";
+  remove.addEventListener("click", () => removeSpriteSheet(sheet.localId));
+  actions.append(slice, remove);
+
+  card.append(image, title, meta, actions);
+  return card;
 }
 
 function createSpriteCard(candidate: SpriteCandidate, approved: boolean): HTMLElement {
@@ -1429,7 +1564,8 @@ function createPackResultCard(result: SpritePackResult): HTMLElement {
 }
 
 async function generateSpriteCandidate(): Promise<void> {
-  const kind: SpriteCandidate["kind"] = spriteKindSelect.value === "viseme" ? "viseme" : "expression";
+  const output = selectedSpriteOutput();
+  const kind = selectedSpriteKind();
   const id = spriteTargetSelect.value;
   const prompt = spritePromptInput.value.trim();
   const modelId = spriteModelInput.value.trim();
@@ -1445,19 +1581,38 @@ async function generateSpriteCandidate(): Promise<void> {
 
   generateSpriteButton.disabled = true;
   try {
+    const requestedMode = spriteModeSelect.value;
+    const references = collectSpriteReferenceInputs();
+    const mode = references.length > 0 && requestedMode === "text-to-image" ? "image-to-image" : requestedMode;
+    if (mode !== requestedMode) {
+      spriteModeSelect.value = mode;
+    }
+    if ((mode === "image-to-image" || mode === "edit") && references.length === 0) {
+      recordEvent({
+        ...activeSessionContext(),
+        source: "sprite",
+        kind: "sprite.generate.rejected",
+        summary: "reference image required",
+      });
+      return;
+    }
+
     const payload: Record<string, unknown> = {
-      mode: spriteModeSelect.value,
+      mode,
       modelId,
       prompt,
       provenance: {
-        label: `${kind}:${id}`,
+        label: output === "sheet" ? `${kind}:sprite-sheet` : `${kind}:${id}`,
         source: "host-generated",
       },
     };
     const seed = Number(spriteSeedInput.value);
     if (Number.isFinite(seed)) payload.seed = seed;
-    const referenceUrl = spriteReferenceInput.value.trim();
-    if (referenceUrl) payload.imageUrl = referenceUrl;
+    if (mode !== "text-to-image" && references.length === 1) {
+      payload.imageUrl = references[0];
+    } else if (mode !== "text-to-image" && references.length > 1) {
+      payload.imageUrls = references;
+    }
 
     const response = await postJson<{ ok: true; result: {
       modelId: string;
@@ -1468,26 +1623,42 @@ async function generateSpriteCandidate(): Promise<void> {
     if (!response.ok) {
       throw new Error(response.error.message);
     }
-    const candidates = response.result.images.map((image, index) => ({
-      localId: `generated:${Date.now()}:${index}`,
-      kind,
-      id,
-      source: "generated" as const,
-      dataUrl: image.dataUrl,
-      url: image.url,
-      prompt: response.result.prompt,
-      modelId: response.result.modelId,
-      generatedAt: response.result.generatedAt,
-    }));
-    spriteState.candidates.unshift(...candidates);
+    if (output === "sheet") {
+      const sheets = response.result.images.map((image, index) => ({
+        localId: `generated-sheet:${Date.now()}:${index}`,
+        name: `${kind} sheet ${index + 1}`,
+        source: "generated" as const,
+        dataUrl: image.dataUrl,
+        url: image.url,
+        prompt: response.result.prompt,
+        modelId: response.result.modelId,
+        generatedAt: response.result.generatedAt,
+      }));
+      spriteState.sheets.unshift(...sheets);
+    } else {
+      const candidates = response.result.images.map((image, index) => ({
+        localId: `generated:${Date.now()}:${index}`,
+        kind,
+        id,
+        source: "generated" as const,
+        dataUrl: image.dataUrl,
+        url: image.url,
+        prompt: response.result.prompt,
+        modelId: response.result.modelId,
+        generatedAt: response.result.generatedAt,
+      }));
+      spriteState.candidates.unshift(...candidates);
+    }
     renderSpriteWorkspace();
     recordEvent({
       ...activeSessionContext(),
       source: "sprite",
       kind: "sprite.generate",
-      summary: `${kind}:${id}`,
+      summary: output === "sheet" ? `${kind}:sprite-sheet` : `${kind}:${id}`,
       payload: {
         modelId: response.result.modelId,
+        output,
+        referenceCount: references.length,
         imageCount: response.result.images.length,
         packReadyCount: response.result.images.filter((image) => image.packReady || image.dataUrl).length,
       },
@@ -1511,23 +1682,25 @@ async function importSpriteFiles(): Promise<void> {
     return;
   }
   const imported: SpriteCandidate[] = [];
+  const kind = selectedSpriteKind();
+  const id = spriteTargetSelect.value;
   for (const [index, file] of files.entries()) {
-    if (file.type !== "image/png") {
+    if (!file.type.startsWith("image/")) {
       recordEvent({
         ...activeSessionContext(),
         source: "sprite",
         kind: "sprite.import.rejected",
-        summary: `${file.name} is not PNG`,
+        summary: `${file.name} is not an image`,
       });
       continue;
     }
-    const target = inferSpriteTargetFromFilename(file.name);
+    const sourceDataUrl = await readFileAsDataUrl(file);
     imported.push({
       localId: `manual:${Date.now()}:${index}`,
-      kind: target.kind,
-      id: target.id,
+      kind,
+      id,
       source: "manual",
-      dataUrl: await readFileAsDataUrl(file),
+      dataUrl: await convertImageDataUrlToPngDataUrl(sourceDataUrl),
     });
   }
   spriteState.candidates.unshift(...imported);
@@ -1537,26 +1710,202 @@ async function importSpriteFiles(): Promise<void> {
     ...activeSessionContext(),
     source: "sprite",
     kind: "sprite.import",
-    summary: `${imported.length} PNG frames`,
+    summary: `${imported.length} frame images for ${kind}:${id}`,
   });
 }
 
-function inferSpriteTargetFromFilename(name: string): Pick<SpriteCandidate, "kind" | "id"> {
-  const lower = name.toLowerCase();
-  const tokens = lower.split(/[^a-z0-9]+/).filter(Boolean);
-  const profile = selectedProfile();
-  const expression = profile.face.expressions.find((id) => tokens.includes(id.toLowerCase()));
-  if (expression || tokens.includes("expression")) {
-    return { kind: "expression", id: expression ?? spriteTargetSelect.value };
+async function importSpriteSheetFiles(): Promise<void> {
+  const files = [...(spriteSheetFile.files ?? [])];
+  if (files.length === 0) {
+    return;
   }
-  const viseme = profile.face.visemes.find((id) => tokens.includes(id.toLowerCase()));
-  if (viseme || tokens.includes("viseme")) {
-    return { kind: "viseme", id: viseme ?? spriteTargetSelect.value };
+  const imported: SpriteSheetCandidate[] = [];
+  for (const [index, file] of files.entries()) {
+    if (!file.type.startsWith("image/")) {
+      recordEvent({
+        ...activeSessionContext(),
+        source: "sprite",
+        kind: "sprite.sheet.import.rejected",
+        summary: `${file.name} is not an image`,
+      });
+      continue;
+    }
+    const sourceDataUrl = await readFileAsDataUrl(file);
+    imported.push({
+      localId: `manual-sheet:${Date.now()}:${index}`,
+      name: file.name,
+      source: "manual",
+      dataUrl: await convertImageDataUrlToPngDataUrl(sourceDataUrl),
+    });
   }
-  return {
-    kind: spriteKindSelect.value === "viseme" ? "viseme" : "expression",
-    id: spriteTargetSelect.value,
-  };
+  spriteState.sheets.unshift(...imported);
+  spriteSheetFile.value = "";
+  renderSpriteWorkspace();
+  recordEvent({
+    ...activeSessionContext(),
+    source: "sprite",
+    kind: "sprite.sheet.import",
+    summary: `${imported.length} sheets`,
+  });
+}
+
+async function importSpriteReferences(): Promise<void> {
+  const files = [...(spriteReferenceFile.files ?? [])];
+  if (files.length === 0) {
+    return;
+  }
+  const references: SpriteReferenceImage[] = [];
+  for (const [index, file] of files.entries()) {
+    if (!file.type.startsWith("image/")) {
+      recordEvent({
+        ...activeSessionContext(),
+        source: "sprite",
+        kind: "sprite.reference.rejected",
+        summary: `${file.name} is not an image`,
+      });
+      continue;
+    }
+    references.push({
+      localId: `reference:${Date.now()}:${index}`,
+      name: file.name,
+      dataUrl: await readFileAsDataUrl(file),
+      mimeType: file.type || "application/octet-stream",
+      sizeBytes: file.size,
+    });
+  }
+  spriteState.references.unshift(...references);
+  if (references.length > 0 && spriteModeSelect.value === "text-to-image") {
+    spriteModeSelect.value = "image-to-image";
+  }
+  spriteReferenceFile.value = "";
+  renderSpriteWorkspace();
+  recordEvent({
+    ...activeSessionContext(),
+    source: "sprite",
+    kind: "sprite.reference.import",
+    summary: `${references.length} references`,
+  });
+}
+
+function collectSpriteReferenceInputs(): string[] {
+  const uploadedReferences = spriteState.references.map((reference) => reference.dataUrl);
+  const urlReference = spriteReferenceInput.value.trim();
+  return [...uploadedReferences, ...(urlReference ? [urlReference] : [])];
+}
+
+function removeSpriteReference(localId: string): void {
+  spriteState.references = spriteState.references.filter((reference) => reference.localId !== localId);
+  renderSpriteWorkspace();
+}
+
+function removeSpriteSheet(localId: string): void {
+  spriteState.sheets = spriteState.sheets.filter((sheet) => sheet.localId !== localId);
+  renderSpriteWorkspace();
+}
+
+async function sliceSpriteSheet(localId: string): Promise<void> {
+  const sheet = spriteState.sheets.find((item) => item.localId === localId);
+  if (!sheet?.dataUrl) {
+    return;
+  }
+  try {
+    const rows = clampInteger(Number(spriteSheetRowsInput.value), 1, 16);
+    const cols = clampInteger(Number(spriteSheetColsInput.value), 1, 16);
+    spriteSheetRowsInput.value = String(rows);
+    spriteSheetColsInput.value = String(cols);
+    const targets = parseSheetFrameTargets(spriteSheetTargetsInput.value);
+    if (targets.length === 0) {
+      recordEvent({
+        ...activeSessionContext(),
+        source: "sprite",
+        kind: "sprite.sheet.slice.rejected",
+        summary: "sheet targets required",
+      });
+      return;
+    }
+
+    const image = await loadImage(sheet.dataUrl);
+    const cellWidth = Math.floor(image.naturalWidth / cols);
+    const cellHeight = Math.floor(image.naturalHeight / rows);
+    if (cellWidth <= 0 || cellHeight <= 0) {
+      throw new Error("Sheet grid is larger than the source image");
+    }
+
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("Canvas 2D context is unavailable");
+    }
+    canvas.width = cellWidth;
+    canvas.height = cellHeight;
+
+    const frameCount = Math.min(rows * cols, targets.length);
+    const frames: ApprovedSpriteFrame[] = [];
+    for (let index = 0; index < frameCount; index += 1) {
+      const target = targets[index];
+      if (!target) continue;
+      const sx = (index % cols) * cellWidth;
+      const sy = Math.floor(index / cols) * cellHeight;
+      context.clearRect(0, 0, cellWidth, cellHeight);
+      context.drawImage(image, sx, sy, cellWidth, cellHeight, 0, 0, cellWidth, cellHeight);
+      frames.push({
+        kind: target.kind,
+        id: target.id,
+        dataUrl: canvas.toDataURL("image/png"),
+        source: "sheet",
+        prompt: sheet.prompt,
+        modelId: sheet.modelId,
+        generatedAt: sheet.generatedAt,
+      });
+    }
+
+    upsertApprovedSprites(frames);
+    spriteState.lastPack = undefined;
+    renderSpriteWorkspace();
+    recordEvent({
+      ...activeSessionContext(),
+      source: "sprite",
+      kind: "sprite.sheet.slice",
+      summary: `${frames.length} frames`,
+      payload: {
+        rows,
+        cols,
+        sheet: sheet.name,
+      },
+    });
+  } catch (error) {
+    recordEvent({
+      ...activeSessionContext(),
+      source: "sprite",
+      kind: "sprite.sheet.slice.failed",
+      summary: error instanceof Error ? error.message : "Sheet slice failed",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+function parseSheetFrameTargets(value: string): Array<{ kind: SpriteFrameKind; id: string }> {
+  return value
+    .split(/[\n,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .flatMap((item) => {
+      const parts = item.split(":").map((part) => part.trim()).filter(Boolean);
+      const maybeKind = parts[0];
+      if (maybeKind === "expression" || maybeKind === "viseme") {
+        const id = parts.slice(1).join(":").trim();
+        return id ? [{ kind: maybeKind, id }] : [];
+      }
+      return [{ kind: selectedSpriteKind(), id: item }];
+    });
+}
+
+function upsertApprovedSprites(frames: ApprovedSpriteFrame[]): void {
+  const replacementKeys = new Set(frames.map((frame) => `${frame.kind}:${frame.id}`));
+  spriteState.approved = [
+    ...spriteState.approved.filter((frame) => !replacementKeys.has(`${frame.kind}:${frame.id}`)),
+    ...frames,
+  ];
 }
 
 function approveSpriteCandidate(localId: string): void {
@@ -1564,18 +1913,15 @@ function approveSpriteCandidate(localId: string): void {
   if (!candidate?.dataUrl) {
     return;
   }
-  spriteState.approved = [
-    ...spriteState.approved.filter((frame) => frame.kind !== candidate.kind || frame.id !== candidate.id),
-    {
-      kind: candidate.kind,
-      id: candidate.id,
-      dataUrl: candidate.dataUrl,
-      source: candidate.source,
-      prompt: candidate.prompt,
-      modelId: candidate.modelId,
-      generatedAt: candidate.generatedAt,
-    },
-  ];
+  upsertApprovedSprites([{
+    kind: candidate.kind,
+    id: candidate.id,
+    dataUrl: candidate.dataUrl,
+    source: candidate.source,
+    prompt: candidate.prompt,
+    modelId: candidate.modelId,
+    generatedAt: candidate.generatedAt,
+  }]);
   spriteState.candidates = spriteState.candidates.filter((item) => item.localId !== localId);
   spriteState.lastPack = undefined;
   renderSpriteWorkspace();
@@ -1686,6 +2032,51 @@ function readFileAsDataUrl(file: File): Promise<string> {
     reader.addEventListener("error", () => reject(reader.error ?? new Error("File read failed")));
     reader.readAsDataURL(file);
   });
+}
+
+async function convertImageDataUrlToPngDataUrl(dataUrl: string): Promise<string> {
+  if (dataUrl.startsWith("data:image/png;")) {
+    return dataUrl;
+  }
+  const image = await loadImage(dataUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Canvas 2D context is unavailable");
+  }
+  context.drawImage(image, 0, 0);
+  return canvas.toDataURL("image/png");
+}
+
+function loadImage(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.addEventListener("load", () => resolve(image), { once: true });
+    image.addEventListener("error", () => reject(new Error("Image could not be loaded")), { once: true });
+    image.src = dataUrl;
+  });
+}
+
+function clampInteger(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) {
+    return "unknown size";
+  }
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function downloadDataUrl(filename: string, dataUrl: string): void {
@@ -1852,6 +2243,7 @@ copyLogButton.addEventListener("click", () => {
 
 exportLogButton.addEventListener("click", () => exportEventLog());
 
+spriteOutputSelect.addEventListener("change", () => renderSpriteWorkspace());
 spriteKindSelect.addEventListener("change", () => renderSpriteWorkspace());
 
 generateSpriteButton.addEventListener("click", () => {
@@ -1860,8 +2252,25 @@ generateSpriteButton.addEventListener("click", () => {
 
 importSpriteButton.addEventListener("click", () => spriteImportFile.click());
 
+importSpriteSheetButton.addEventListener("click", () => spriteSheetFile.click());
+
+uploadSpriteReferenceButton.addEventListener("click", () => spriteReferenceFile.click());
+
+clearSpriteReferencesButton.addEventListener("click", () => {
+  spriteState.references = [];
+  renderSpriteWorkspace();
+});
+
+spriteReferenceFile.addEventListener("change", () => {
+  void importSpriteReferences();
+});
+
 spriteImportFile.addEventListener("change", () => {
   void importSpriteFiles();
+});
+
+spriteSheetFile.addEventListener("change", () => {
+  void importSpriteSheetFiles();
 });
 
 packSpritesButton.addEventListener("click", () => {

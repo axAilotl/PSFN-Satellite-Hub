@@ -265,13 +265,21 @@
           </div>
           <div class="button-row">
             <button id="generate-sprite-button" type="button">Generate</button>
-            <button id="import-sprite-button" type="button" class="secondary">Import PNG</button>
+            <button id="import-sprite-button" type="button" class="secondary">Import Frame</button>
+            <button id="import-sprite-sheet-button" type="button" class="secondary">Import Sheet</button>
             <button id="pack-sprites-button" type="button" class="secondary">Pack/Export</button>
           </div>
         </div>
         <div class="sprite-workspace">
           <section class="editor-block sprite-controls" aria-label="Sprite generation controls">
-            <div class="frame-field-grid">
+            <div class="sprite-field-grid">
+              <label class="field">
+                <span>Output</span>
+                <select id="sprite-output-select">
+                  <option value="frame">frame</option>
+                  <option value="sheet">sprite sheet</option>
+                </select>
+              </label>
               <label class="field">
                 <span>Kind</span>
                 <select id="sprite-kind-select">
@@ -307,11 +315,31 @@
                 <span>Prompt</span>
                 <textarea id="sprite-prompt-input" rows="3" spellcheck="true">small expressive lcd avatar face, transparent background, crisp pixel-safe shapes</textarea>
               </label>
+              <div class="button-row field-wide">
+                <button id="upload-sprite-reference-button" type="button" class="secondary">Upload Reference</button>
+                <button id="clear-sprite-references-button" type="button" class="secondary">Clear References</button>
+              </div>
+              <label class="field">
+                <span>Sheet rows</span>
+                <input id="sprite-sheet-rows-input" type="number" min="1" max="16" step="1" value="2">
+              </label>
+              <label class="field">
+                <span>Sheet cols</span>
+                <input id="sprite-sheet-cols-input" type="number" min="1" max="16" step="1" value="4">
+              </label>
+              <label class="field field-wide">
+                <span>Sheet targets</span>
+                <textarea id="sprite-sheet-targets-input" rows="4" spellcheck="false"></textarea>
+              </label>
             </div>
-            <input id="sprite-import-file" class="visually-hidden" type="file" accept="image/png" multiple>
+            <input id="sprite-reference-file" class="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp" multiple>
+            <input id="sprite-import-file" class="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp" multiple>
+            <input id="sprite-sheet-file" class="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp" multiple>
+            <div id="sprite-reference-grid" class="sprite-card-grid reference-grid"></div>
             <output id="sprite-status" class="sprite-status">0 approved frames</output>
           </section>
           <section class="editor-block sprite-review" aria-label="Sprite candidates">
+            <div id="sprite-sheet-grid" class="sprite-card-grid sheet-grid"></div>
             <div id="sprite-candidate-grid" class="sprite-card-grid"></div>
           </section>
           <section class="editor-block sprite-approved" aria-label="Approved sprites">

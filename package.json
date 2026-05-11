@@ -11,11 +11,13 @@
     "shell:psfn": "node scripts/psfn-thin-shell.mjs",
     "studio:build": "npm run build:ts && node scripts/build-device-studio.mjs",
     "studio:dev": "npm run studio:build && node scripts/serve-device-studio.mjs",
+    "studio:smoke:sprites": "npm run studio:build && node scripts/smoke-device-studio-sprite-editor.mjs",
     "studio:sprites": "npm run build:ts && node dist/ts/device-studio/sprite-cli.js",
     "test:ts": "npm run build:ts && node --test dist/ts/**/*.test.js",
     "check:ts": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@fal-ai/client": "^1.10.1",
     "dotenv": "^16.6.1",
     "openai": "^5.20.2",
     "three": "^0.184.0",
@@ -26,6 +28,7 @@
     "@types/node": "^24.5.2",
     "@types/three": "^0.184.1",
     "@types/ws": "^8.18.1",
+    "playwright": "^1.60.0",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"
   }
