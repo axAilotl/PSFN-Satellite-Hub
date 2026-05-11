@@ -37,7 +37,9 @@ try {
   const referencePath = path.join(sampleDir, "reference.png");
   const sheetPath = path.join(sampleDir, "sheet.png");
   await fs.writeFile(referencePath, makePng(32, 32, (x, y) => [40 + x * 4, 90 + y * 4, 190, 255]));
-  await fs.writeFile(sheetPath, makePng(64, 32, (x) => (x < 32 ? [235, 70, 80, 255] : [45, 160, 95, 255])));
+  const sheetPng = makePng(64, 32, (x) => (x < 32 ? [235, 70, 80, 255] : [45, 160, 95, 255]));
+  await fs.writeFile(sheetPath, sheetPng);
+  const sheetDataUrl = `data:image/png;base64,${sheetPng.toString("base64")}`;
 
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
@@ -48,19 +50,46 @@ try {
   await page.setInputFiles("#sprite-reference-file", referencePath);
   await page.waitForFunction(() => document.querySelectorAll("#sprite-reference-grid .sprite-card").length === 1);
   const mode = await page.locator("#sprite-mode-select").inputValue();
-  if (mode !== "image-to-image") {
-    throw new Error("Reference upload did not switch generation mode to image-to-image");
+  if (mode !== "edit") {
+    throw new Error("Reference upload did not switch generation mode to edit");
+  }
+  const modelId = await page.locator("#sprite-model-input").inputValue();
+  if (modelId !== "fal-ai/nano-banana/edit") {
+    throw new Error(`Reference upload did not select an edit endpoint: ${modelId}`);
   }
   const frameCandidates = await page.locator("#sprite-candidate-grid .sprite-card").count();
   if (frameCandidates !== 0) {
     throw new Error("Reference upload created frame candidates");
   }
 
-  await page.setInputFiles("#sprite-sheet-file", sheetPath);
-  await page.waitForFunction(() => document.querySelectorAll("#sprite-sheet-grid .sprite-card").length === 1);
+  let capturedGeneratePayload;
+  await page.route("**/api/sprites/generate", async (route) => {
+    capturedGeneratePayload = JSON.parse(route.request().postData() || "{}");
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        result: {
+          modelId: capturedGeneratePayload.modelId,
+          generatedAt: "2026-05-11T00:00:00.000Z",
+          prompt: capturedGeneratePayload.prompt,
+          images: [{
+            url: "https://example.test/generated-sheet.png",
+            dataUrl: sheetDataUrl,
+            packReady: true,
+          }],
+        },
+      }),
+    });
+  });
+  await page.selectOption("#sprite-output-select", "sheet");
   await page.fill("#sprite-sheet-rows-input", "1");
   await page.fill("#sprite-sheet-cols-input", "2");
   await page.fill("#sprite-sheet-targets-input", "expression:happy\nviseme:a");
+  await page.click("#generate-sprite-button");
+  await page.waitForFunction(() => document.querySelectorAll("#sprite-sheet-grid .sprite-card").length === 1);
+  assertSheetGeneratePayload(capturedGeneratePayload);
   await page.locator("#sprite-sheet-grid .sprite-card").getByRole("button", { name: "Slice" }).click();
   await page.waitForFunction(() => document.querySelectorAll("#sprite-approved-grid .sprite-card[data-approved=\"true\"]").length === 2);
 
@@ -84,6 +113,37 @@ try {
   await browser?.close();
   if (server && !server.killed) {
     server.kill("SIGTERM");
+  }
+}
+
+function assertSheetGeneratePayload(payload) {
+  if (!payload || typeof payload !== "object") {
+    throw new Error("Sprite sheet generate payload was not captured");
+  }
+  if (payload.mode !== "edit") {
+    throw new Error(`Sprite sheet generation did not force edit mode: ${payload.mode}`);
+  }
+  if (payload.modelId !== "fal-ai/nano-banana/edit") {
+    throw new Error(`Sprite sheet generation did not use edit endpoint: ${payload.modelId}`);
+  }
+  if (!Array.isArray(payload.imageUrls) && typeof payload.imageUrl !== "string") {
+    throw new Error("Sprite sheet generation did not include reference image input");
+  }
+  const prompt = String(payload.prompt || "");
+  for (const required of [
+    "ONE single PNG sprite sheet image",
+    "exact 2 columns by 1 rows grid",
+    "not a single isolated sprite",
+    "Use the uploaded reference image",
+    "row 1, column 1: expression:happy",
+    "row 1, column 2: viseme:a",
+  ]) {
+    if (!prompt.includes(required)) {
+      throw new Error(`Sprite sheet prompt is missing: ${required}`);
+    }
+  }
+  if (payload.options?.output_format !== "png" || payload.options?.num_images !== 1 || payload.options?.limit_generations !== true) {
+    throw new Error(`Sprite sheet generation options are wrong: ${JSON.stringify(payload.options)}`);
   }
 }
 

@@ -114,7 +114,7 @@ export class FalImageProvider {
         Authorization: `Key ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(buildFalRequestBody({ prompt, seed: request.seed, options: request.options, imageUrls })),
+      body: JSON.stringify(buildFalRequestBody({ mode, prompt, seed: request.seed, options: request.options, imageUrls })),
     });
 
     if (!response.ok) {
@@ -161,6 +161,7 @@ export class FalImageProvider {
 }
 
 function buildFalRequestBody(input: {
+  mode: FalGenerationMode;
   prompt: string;
   seed?: number;
   options?: Record<string, unknown>;
@@ -173,7 +174,9 @@ function buildFalRequestBody(input: {
   if (input.seed !== undefined) {
     body.seed = input.seed;
   }
-  if (input.imageUrls.length === 1) {
+  if (input.mode === "edit" && input.imageUrls.length > 0) {
+    body.image_urls = input.imageUrls;
+  } else if (input.imageUrls.length === 1) {
     const firstImageUrl = input.imageUrls[0];
     if (firstImageUrl) body.image_url = firstImageUrl;
   } else if (input.imageUrls.length > 1) {

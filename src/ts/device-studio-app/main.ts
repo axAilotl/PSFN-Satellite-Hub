@@ -66,6 +66,7 @@ interface StudioState {
 type SpriteFrameKind = "expression" | "viseme";
 type SpriteFrameSource = "generated" | "manual" | "sheet";
 type SpriteOutputMode = "frame" | "sheet";
+type SpriteGenerationMode = "text-to-image" | "image-to-image" | "edit";
 
 interface SpriteCandidate {
   localId: string;
@@ -1431,6 +1432,11 @@ function selectedSpriteOutput(): SpriteOutputMode {
   return spriteOutputSelect.value === "sheet" ? "sheet" : "frame";
 }
 
+function selectedSpriteMode(): SpriteGenerationMode {
+  const value = spriteModeSelect.value;
+  return value === "image-to-image" || value === "edit" ? value : "text-to-image";
+}
+
 function selectedSpriteTargets(profile = selectedProfile()): readonly string[] {
   return selectedSpriteKind() === "expression" ? profile.face.expressions : profile.face.visemes;
 }
@@ -1567,9 +1573,9 @@ async function generateSpriteCandidate(): Promise<void> {
   const output = selectedSpriteOutput();
   const kind = selectedSpriteKind();
   const id = spriteTargetSelect.value;
-  const prompt = spritePromptInput.value.trim();
-  const modelId = spriteModelInput.value.trim();
-  if (!prompt || !modelId) {
+  const userPrompt = spritePromptInput.value.trim();
+  const requestedModelId = spriteModelInput.value.trim();
+  if (!userPrompt || !requestedModelId) {
     recordEvent({
       ...activeSessionContext(),
       source: "sprite",
@@ -1581,11 +1587,25 @@ async function generateSpriteCandidate(): Promise<void> {
 
   generateSpriteButton.disabled = true;
   try {
-    const requestedMode = spriteModeSelect.value;
     const references = collectSpriteReferenceInputs();
-    const mode = references.length > 0 && requestedMode === "text-to-image" ? "image-to-image" : requestedMode;
-    if (mode !== requestedMode) {
+    const mode = resolveSpriteGenerationMode(output, selectedSpriteMode(), references.length);
+    const modelId = resolveSpriteModelIdForMode(requestedModelId, mode);
+    const prompt = output === "sheet"
+      ? buildSpriteSheetPrompt({
+        userPrompt,
+        kind,
+        rows: selectedSpriteSheetGrid().rows,
+        cols: selectedSpriteSheetGrid().cols,
+        targets: parseSheetFrameTargets(spriteSheetTargetsInput.value),
+        usesReferences: references.length > 0,
+      })
+      : userPrompt;
+
+    if (mode !== selectedSpriteMode()) {
       spriteModeSelect.value = mode;
+    }
+    if (modelId !== requestedModelId) {
+      spriteModelInput.value = modelId;
     }
     if ((mode === "image-to-image" || mode === "edit") && references.length === 0) {
       recordEvent({
@@ -1601,6 +1621,7 @@ async function generateSpriteCandidate(): Promise<void> {
       mode,
       modelId,
       prompt,
+      options: buildSpriteGenerationOptions(output, mode, modelId),
       provenance: {
         label: output === "sheet" ? `${kind}:sprite-sheet` : `${kind}:${id}`,
         source: "host-generated",
@@ -1659,6 +1680,7 @@ async function generateSpriteCandidate(): Promise<void> {
         modelId: response.result.modelId,
         output,
         referenceCount: references.length,
+        promptKind: output === "sheet" ? "sprite-sheet-expanded" : "user",
         imageCount: response.result.images.length,
         packReadyCount: response.result.images.filter((image) => image.packReady || image.dataUrl).length,
       },
@@ -1774,8 +1796,9 @@ async function importSpriteReferences(): Promise<void> {
     });
   }
   spriteState.references.unshift(...references);
-  if (references.length > 0 && spriteModeSelect.value === "text-to-image") {
-    spriteModeSelect.value = "image-to-image";
+  if (references.length > 0) {
+    spriteModeSelect.value = "edit";
+    spriteModelInput.value = resolveSpriteModelIdForMode(spriteModelInput.value.trim(), "edit");
   }
   spriteReferenceFile.value = "";
   renderSpriteWorkspace();
@@ -1791,6 +1814,118 @@ function collectSpriteReferenceInputs(): string[] {
   const uploadedReferences = spriteState.references.map((reference) => reference.dataUrl);
   const urlReference = spriteReferenceInput.value.trim();
   return [...uploadedReferences, ...(urlReference ? [urlReference] : [])];
+}
+
+function resolveSpriteGenerationMode(
+  output: SpriteOutputMode,
+  requestedMode: SpriteGenerationMode,
+  referenceCount: number,
+): SpriteGenerationMode {
+  if (referenceCount > 0 && output === "sheet") {
+    return "edit";
+  }
+  if (referenceCount > 0 && requestedMode === "text-to-image") {
+    return "edit";
+  }
+  return requestedMode;
+}
+
+function resolveSpriteModelIdForMode(modelId: string, mode: SpriteGenerationMode): string {
+  if (mode === "text-to-image" || modelId.endsWith("/edit")) {
+    return modelId;
+  }
+  if (/^fal-ai\/(?:nano-banana|nano-banana-2|gpt-image-1\.5)$/.test(modelId)) {
+    return `${modelId}/edit`;
+  }
+  return modelId;
+}
+
+function selectedSpriteSheetGrid(): { rows: number; cols: number } {
+  const rows = clampInteger(Number(spriteSheetRowsInput.value), 1, 16);
+  const cols = clampInteger(Number(spriteSheetColsInput.value), 1, 16);
+  spriteSheetRowsInput.value = String(rows);
+  spriteSheetColsInput.value = String(cols);
+  return { rows, cols };
+}
+
+function buildSpriteGenerationOptions(
+  output: SpriteOutputMode,
+  mode: SpriteGenerationMode,
+  modelId: string,
+): Record<string, unknown> {
+  if (output !== "sheet") {
+    return mode === "text-to-image" ? { output_format: "png", num_images: 1 } : { output_format: "png", num_images: 1 };
+  }
+  const { rows, cols } = selectedSpriteSheetGrid();
+  const aspectRatio = chooseFalAspectRatio(cols, rows);
+  const options: Record<string, unknown> = {
+    num_images: 1,
+    output_format: "png",
+    sync_mode: false,
+  };
+  if (modelId.includes("gpt-image")) {
+    return {
+      ...options,
+      image_size: chooseGptImageSize(cols, rows),
+      background: "transparent",
+      quality: "high",
+      input_fidelity: mode === "text-to-image" ? undefined : "high",
+    };
+  }
+  return {
+    ...options,
+    aspect_ratio: aspectRatio,
+    limit_generations: true,
+  };
+}
+
+function chooseFalAspectRatio(cols: number, rows: number): string {
+  const ratio = cols / rows;
+  if (ratio >= 1.75) return "16:9";
+  if (ratio >= 1.35) return "4:3";
+  if (ratio >= 1.1) return "5:4";
+  if (ratio > 0.9) return "1:1";
+  if (ratio > 0.72) return "4:5";
+  if (ratio > 0.58) return "3:4";
+  return "9:16";
+}
+
+function chooseGptImageSize(cols: number, rows: number): string {
+  const ratio = cols / rows;
+  if (ratio > 1.15) return "1536x1024";
+  if (ratio < 0.85) return "1024x1536";
+  return "1024x1024";
+}
+
+function buildSpriteSheetPrompt(input: {
+  userPrompt: string;
+  kind: SpriteFrameKind;
+  rows: number;
+  cols: number;
+  targets: Array<{ kind: SpriteFrameKind; id: string }>;
+  usesReferences: boolean;
+}): string {
+  const cellCount = input.rows * input.cols;
+  const targets = input.targets.length > 0
+    ? input.targets.slice(0, cellCount)
+    : selectedSpriteTargets().slice(0, cellCount).map((id) => ({ kind: input.kind, id }));
+  const targetPlan = targets.map((target, index) => {
+    const row = Math.floor(index / input.cols) + 1;
+    const col = (index % input.cols) + 1;
+    return `row ${row}, column ${col}: ${target.kind}:${target.id}`;
+  }).join("; ");
+  return [
+    `Create ONE single PNG sprite sheet image arranged as an exact ${input.cols} columns by ${input.rows} rows grid (${cellCount} equal cells).`,
+    "This must be one complete sheet image, not a single isolated sprite, not separate images, not a collage with uneven panels.",
+    "Each cell must have the same avatar centered at the same scale on a transparent background.",
+    "Do not add labels, captions, numbers, grid lines, borders, UI chrome, extra characters, or text in the image.",
+    input.usesReferences
+      ? "Use the uploaded reference image(s) as the identity and style source. Preserve the same character design, silhouette, colors, and rendering style across every cell."
+      : "Keep the same character design, silhouette, colors, and rendering style across every cell.",
+    `Fill cells in reading order with these targets: ${targetPlan}.`,
+    "Only change the expression, mouth, and/or viseme required by each target cell.",
+    `Base art direction from the user: ${input.userPrompt}`,
+  ].join("\n");
 }
 
 function removeSpriteReference(localId: string): void {
@@ -1809,10 +1944,7 @@ async function sliceSpriteSheet(localId: string): Promise<void> {
     return;
   }
   try {
-    const rows = clampInteger(Number(spriteSheetRowsInput.value), 1, 16);
-    const cols = clampInteger(Number(spriteSheetColsInput.value), 1, 16);
-    spriteSheetRowsInput.value = String(rows);
-    spriteSheetColsInput.value = String(cols);
+    const { rows, cols } = selectedSpriteSheetGrid();
     const targets = parseSheetFrameTargets(spriteSheetTargetsInput.value);
     if (targets.length === 0) {
       recordEvent({
@@ -2243,7 +2375,13 @@ copyLogButton.addEventListener("click", () => {
 
 exportLogButton.addEventListener("click", () => exportEventLog());
 
-spriteOutputSelect.addEventListener("change", () => renderSpriteWorkspace());
+spriteOutputSelect.addEventListener("change", () => {
+  if (selectedSpriteOutput() === "sheet" && collectSpriteReferenceInputs().length > 0) {
+    spriteModeSelect.value = "edit";
+    spriteModelInput.value = resolveSpriteModelIdForMode(spriteModelInput.value.trim(), "edit");
+  }
+  renderSpriteWorkspace();
+});
 spriteKindSelect.addEventListener("change", () => renderSpriteWorkspace());
 
 generateSpriteButton.addEventListener("click", () => {

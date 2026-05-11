@@ -158,7 +158,7 @@ test("FAL image-to-image request serializes source image URLs without leaking th
   assert(!JSON.stringify(result).includes(secret));
 });
 
-test("FAL edit request supports single image_url and top-level image response", async () => {
+test("FAL edit request sends image_urls array and supports top-level image response", async () => {
   let capturedUrl = "";
   let capturedBody: Record<string, unknown> = {};
 
@@ -189,7 +189,7 @@ test("FAL edit request supports single image_url and top-level image response", 
   assert.equal(capturedUrl, "https://fal.run/fal-ai/test-inpaint-model");
   assert.deepEqual(capturedBody, {
     prompt: "make the eyes happy",
-    image_url: "https://assets.example.test/source.png",
+    image_urls: ["https://assets.example.test/source.png"],
   });
   assert.equal(result.requestId, "req-edit");
   assert.deepEqual(result.images, [
