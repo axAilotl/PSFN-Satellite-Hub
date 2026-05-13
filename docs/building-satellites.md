@@ -136,6 +136,8 @@ Android/Amica POC endpoint with speech, optional vision, and mobile telemetry:
             "text_to_speech",
             "vision",
             "image_upload",
+            "avatar",
+            "avatar_expression",
             "location",
             "timezone",
             "battery",
@@ -197,6 +199,14 @@ For a speech-only Pi, use the same shape with `voice-only`, `kitchen-pi`, and
 `kitchen-pi-realtime`. Keep `PSFN_CLAIM_TYPE`, `PSFN_CAPABILITY_PROFILE`,
 `PSFN_SATELLITE_ID`, and `PSFN_ENDPOINT_ID` aligned with the PSFN
 `satellites.json` entry.
+
+For an Amica browser/avatar conduit, use a claim type registered for that
+endpoint, for example `amica-conduit`, and keep the registry maximum wide enough
+for the capabilities Amica advertises. Amica's default output capabilities
+`text,subtitle,streamed_audio,animation,expression,gaze` map to Framework
+capabilities `text`, `audio_output`, `text_to_speech`, `avatar`, and
+`avatar_expression`. Add `vision` and `image_upload` only when Amica is
+configured to advertise `vision_upload`.
 
 For high-trust registered endpoints, configure `PSFN_CLIENT_CERT_PATH` and
 `PSFN_CLIENT_KEY_PATH` so the hub presents client certificate identity to PSFN.
