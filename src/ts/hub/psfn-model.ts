@@ -8,6 +8,7 @@ import type { AgentRuntimeAdapter } from "./agent-runtime.js";
 import type { PsfnRuntimeConfig } from "../shared/env.js";
 import {
   buildSatelliteClaimEnvelope,
+  buildSatelliteRegistryHeaders,
   defaultCapabilitiesForProfile,
   type SatelliteClaimEnvelope,
 } from "./satellite-claim.js";
@@ -175,6 +176,10 @@ export class PsfnModelAdapter implements AgentRuntimeAdapter {
     headers["X-PSFN-Channel-ID"] = channel.channelId;
     headers["X-PSFN-Satellite-ID"] = channel.sourceSatelliteId;
     headers["X-PSFN-Satellite-Name"] = channel.sourceSatelliteName;
+    Object.assign(headers, buildSatelliteRegistryHeaders({
+      config: this.runtime.satelliteClaim,
+      satelliteClaim,
+    }));
     headers["X-PSFN-Satellite-Claim"] = JSON.stringify(satelliteClaim);
     headers["X-PSFN-Channel-Metadata"] = JSON.stringify({
       sessionId: channel.sessionId,

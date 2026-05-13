@@ -27,6 +27,38 @@ TelemetryCategory = Literal[
     "device_status",
     "avatar_state",
 ]
+FrameworkCapability = Literal[
+    "text",
+    "audio_input",
+    "speech_to_text",
+    "audio_output",
+    "text_to_speech",
+    "vision",
+    "image_upload",
+    "avatar",
+    "avatar_expression",
+    "avatar_action",
+    "location",
+    "timezone",
+    "presence",
+    "health",
+    "battery",
+    "telemetry",
+    "outbound_delivery",
+    "robotics",
+]
+FrameworkTelemetryScope = Literal[
+    "location",
+    "timezone",
+    "presence",
+    "health",
+    "battery",
+    "network",
+    "orientation",
+    "ambient",
+    "device",
+    "status",
+]
 
 
 class SatelliteCapabilities(TypedDict):
@@ -143,8 +175,8 @@ CAPABILITY_PROFILE_DEFAULTS: dict[CapabilityProfile, ProfileDefaults] = {
         endpoint_class="mobile",
         location_mode="mobile",
         capabilities={
-            "input": ["text"],
-            "output": ["text", "subtitle"],
+            "input": ["microphone_pcm", "final_transcript", "text", "vision_upload", "wake_event"],
+            "output": ["text", "subtitle", "streamed_audio"],
             "control": ["interrupt", "presence", "session_attach"],
             "safety": ["confirmation_required"],
         },
@@ -246,6 +278,96 @@ def build_satellite_claim_envelope(
     }
 
 
+def build_satellite_registry_headers(
+    *,
+    config: SatelliteClaimConfig,
+    satellite_claim: dict[str, object],
+) -> dict[str, str]:
+    claim = satellite_claim.get("claim")
+    capabilities = satellite_claim.get("capabilities")
+    if not isinstance(claim, dict):
+        raise ValueError("satellite claim envelope is missing claim metadata")
+    if not isinstance(capabilities, dict):
+        raise ValueError("satellite claim envelope is missing capability metadata")
+    current_capabilities = capabilities.get("current")
+    if not isinstance(current_capabilities, dict):
+        raise ValueError("satellite claim envelope is missing current capabilities")
+
+    mapped_capabilities = framework_capabilities_for_satellite_capabilities(current_capabilities)
+    telemetry_scopes = framework_telemetry_scopes_for_config(config.telemetry)
+    headers = {
+        "X-PSFN-Satellite-Claim-Type": config.type,
+        "X-PSFN-Satellite-ID": config.satellite_id,
+        "X-PSFN-Satellite-Endpoint-ID": config.endpoint_id,
+        "X-PSFN-Satellite-Session-ID": str(claim.get("sessionId") or ""),
+        "X-PSFN-Satellite-Thread-ID": str(claim.get("threadId") or ""),
+    }
+    if mapped_capabilities:
+        headers["X-PSFN-Satellite-Capabilities"] = ",".join(mapped_capabilities)
+    if telemetry_scopes:
+        headers["X-PSFN-Satellite-Telemetry-Scopes"] = ",".join(telemetry_scopes)
+
+    auth = satellite_claim.get("auth")
+    if isinstance(auth, dict):
+        fingerprint = auth.get("clientCertificateFingerprintSha256")
+        if isinstance(fingerprint, str) and fingerprint:
+            headers["X-PSFN-Client-Cert-Fingerprint-SHA256"] = fingerprint
+
+    return headers
+
+
+def framework_capabilities_for_satellite_capabilities(
+    capabilities: SatelliteCapabilities | dict[str, object],
+) -> tuple[FrameworkCapability, ...]:
+    inputs = set(_string_values(capabilities.get("input", [])))
+    outputs = set(_string_values(capabilities.get("output", [])))
+    mapped: list[FrameworkCapability] = []
+
+    def add(value: FrameworkCapability) -> None:
+        if value not in mapped:
+            mapped.append(value)
+
+    if {"text"} & inputs or {"text", "subtitle"} & outputs:
+        add("text")
+    if {"microphone_pcm", "wake_event"} & inputs:
+        add("audio_input")
+    if "final_transcript" in inputs:
+        add("speech_to_text")
+    if {"streamed_audio", "local_file_audio"} & outputs:
+        add("audio_output")
+        add("text_to_speech")
+    if "vision_upload" in inputs:
+        add("vision")
+        add("image_upload")
+    if {"animation", "expression", "action", "gaze"} & outputs:
+        add("avatar")
+    if "expression" in outputs:
+        add("avatar_expression")
+    if "action" in outputs:
+        add("avatar_action")
+    return tuple(mapped)
+
+
+def framework_telemetry_scopes_for_config(telemetry: TelemetryConfig) -> tuple[FrameworkTelemetryScope, ...]:
+    if telemetry.mode == "disabled":
+        return ()
+    mapped: list[FrameworkTelemetryScope] = []
+
+    def add(value: FrameworkTelemetryScope) -> None:
+        if value not in mapped:
+            mapped.append(value)
+
+    for category in telemetry.categories:
+        if category in {"location", "timezone", "presence", "battery", "health"}:
+            add(category)
+        elif category == "device_status":
+            add("device")
+            add("status")
+        elif category == "avatar_state":
+            add("status")
+    return tuple(mapped)
+
+
 def derive_channel_id(channel_type: str, conversation_id: str) -> str:
     normalized = conversation_id.strip()
     if not normalized:
@@ -262,6 +384,12 @@ def _clone_capabilities(capabilities: SatelliteCapabilities) -> SatelliteCapabil
         "control": list(capabilities.get("control", [])),
         "safety": list(capabilities.get("safety", [])),
     }
+
+
+def _string_values(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(item for item in value if isinstance(item, str) and item)
 
 
 def _certificate_fingerprint(path: Path | None) -> str | None:

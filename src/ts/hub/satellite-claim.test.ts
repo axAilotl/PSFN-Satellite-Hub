@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildSatelliteRegistryHeaders,
   buildSatelliteClaimEnvelope,
+  frameworkCapabilitiesForSatelliteCapabilities,
+  frameworkTelemetryScopesForConfig,
   normalizeSatelliteClaimConfig,
 } from "./satellite-claim.js";
 
@@ -22,6 +25,29 @@ test("satellite claim config supports mobile location endpoint profiles", () => 
     mode: "event",
     categories: ["location", "timezone", "presence", "battery", "health"],
   });
+  assert.deepEqual(frameworkCapabilitiesForSatelliteCapabilities(
+    {
+      input: ["microphone_pcm", "final_transcript", "text", "vision_upload", "wake_event"],
+      output: ["text", "subtitle", "streamed_audio"],
+      control: ["interrupt", "presence", "session_attach"],
+      safety: ["confirmation_required"],
+    },
+  ), [
+    "text",
+    "audio_input",
+    "speech_to_text",
+    "audio_output",
+    "text_to_speech",
+    "vision",
+    "image_upload",
+  ]);
+  assert.deepEqual(frameworkTelemetryScopesForConfig(config.telemetry), [
+    "location",
+    "timezone",
+    "presence",
+    "battery",
+    "health",
+  ]);
 });
 
 test("satellite claim envelope carries current capabilities without granting permissions", () => {
@@ -69,5 +95,14 @@ test("satellite claim envelope carries current capabilities without granting per
   assert.deepEqual(envelope.auth, {
     mode: "bearer",
     clientCertificateConfigured: false,
+  });
+  assert.deepEqual(buildSatelliteRegistryHeaders({ config, satelliteClaim: envelope }), {
+    "X-PSFN-Satellite-Claim-Type": "voxta-avatar",
+    "X-PSFN-Satellite-ID": "voxta-vam",
+    "X-PSFN-Satellite-Endpoint-ID": "vam-plugin",
+    "X-PSFN-Satellite-Session-ID": "voxta:chat-1",
+    "X-PSFN-Satellite-Thread-ID": "voxta:chat-1",
+    "X-PSFN-Satellite-Capabilities": "text",
+    "X-PSFN-Satellite-Telemetry-Scopes": "presence,status",
   });
 });

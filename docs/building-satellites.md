@@ -5,9 +5,11 @@ real device, simulated device, or client surface to a PSFN-backed conversation.
 Examples include a Pi voice endpoint, a browser text shell, a Device Studio
 simulator, a Voxta/VaM avatar, a mobile browser, or a telemetry-only sidecar.
 
-This guide covers the hub-facing realtime WebSocket path. Stock ESPHome voice
-devices use the Python ESPHome fallback path and do not need to implement this
-protocol directly.
+This guide covers the hub-facing realtime WebSocket path and the matching
+PSFN framework registry contract. Stock ESPHome voice devices use the Python
+ESPHome fallback path and do not need to implement the WebSocket protocol
+directly, but they still use the same PSFN registry headers when the hub calls
+PSFN.
 
 ## Integration Model
 
@@ -17,16 +19,27 @@ The hub sits between the satellite and PSFN:
 satellite endpoint
   -> realtime websocket hello/audio/text/control
   -> PSFN Satellite Hub
-  -> PSFN chat runtime with satellite claim envelope
+  -> PSFN chat runtime with registry-backed satellite headers
   <- assistant text/audio/control events
   <- satellite endpoint
 ```
 
 The satellite proves what it can currently do to the hub through the `hello`
 payload. The hub then advertises endpoint identity, current capabilities, and
-configured telemetry to PSFN through a satellite claim envelope. PSFN policy is
-expected to intersect those advertised capabilities with registry permissions;
-the satellite must not assume that advertising a capability grants permission.
+configured telemetry to PSFN through scalar registry headers. PSFN intersects
+those advertised values with `satellites.json`; the satellite must not assume
+that advertising a capability grants permission.
+
+There are two separate contracts:
+
+| Boundary | Authority | What moves across it |
+| --- | --- | --- |
+| Satellite -> hub | The satellite's `hello` payload | Current local device capabilities for this connection |
+| Hub -> PSFN framework | PSFN `satellites.json` plus hub `.env` | Registered endpoint identity, session/thread IDs, and registry-bounded capability advertisements |
+
+The hub still sends the JSON `satellite_claim` body and
+`X-PSFN-Satellite-Claim` header as diagnostics. The current PSFN framework
+contract is the scalar header set documented below, not that JSON envelope.
 
 ## Choose an Endpoint Shape
 
@@ -39,16 +52,121 @@ Use the narrowest profile that matches the endpoint:
 | `voxta-avatar` | VaM/Voxta avatar facade | text, local audio file playback, avatar actions/expressions |
 | `vision-capable` | Image upload or camera endpoint | text plus image upload, text/subtitle output |
 | `telemetry-only` | Health/presence/device-state sidecar | presence/control only, no chat input/output |
-| `mobile-location` | Phone/tablet/browser endpoint with location | text plus configured location/timezone/battery telemetry |
+| `mobile-location` | Phone/tablet/browser endpoint | text, optional mic/speaker, optional image upload, configured location/timezone/battery telemetry |
 
 Only advertise capabilities that are actually available at runtime. If a camera,
 speaker, microphone, avatar action path, or telemetry source is unavailable,
 omit or degrade that capability before sending `hello`.
 
+## PSFN Framework Registry
+
+The PSFN framework must have a matching `satellites.json` in its system data
+directory. If the file is missing or disabled, satellite claims fail with
+`satellite_registry_not_configured`.
+
+Minimal voice endpoint:
+
+```json
+{
+  "schemaVersion": 1,
+  "enabled": true,
+  "satellites": [
+    {
+      "satelliteId": "kitchen-pi",
+      "displayName": "Kitchen Pi",
+      "mobility": "static",
+      "staticLocationLabel": "kitchen",
+      "endpoints": [
+        {
+          "endpointId": "kitchen-pi-realtime",
+          "displayName": "Kitchen Pi Realtime",
+          "claimTypes": ["voice-only"],
+          "promptChannelType": "voice_satellite",
+          "auth": { "mode": "api_key" },
+          "defaultIdentity": {
+            "authorId": "primary-user",
+            "authorName": "Primary User",
+            "canonicalContactId": "contact-primary-user",
+            "channelPrivacy": "private"
+          },
+          "maxCapabilities": [
+            "text",
+            "audio_input",
+            "speech_to_text",
+            "audio_output",
+            "text_to_speech"
+          ],
+          "telemetryScopes": []
+        }
+      ]
+    }
+  ]
+}
+```
+
+Android/Amica POC endpoint with speech, optional vision, and mobile telemetry:
+
+```json
+{
+  "schemaVersion": 1,
+  "enabled": true,
+  "satellites": [
+    {
+      "satelliteId": "amica-android",
+      "displayName": "Amica Android",
+      "mobility": "mobile",
+      "endpoints": [
+        {
+          "endpointId": "amica-android-app",
+          "displayName": "Amica Android App",
+          "claimTypes": ["mobile-location"],
+          "promptChannelType": "mobile_satellite",
+          "auth": { "mode": "api_key" },
+          "defaultIdentity": {
+            "authorId": "primary-user",
+            "authorName": "Primary User",
+            "canonicalContactId": "contact-primary-user",
+            "channelPrivacy": "private"
+          },
+          "maxCapabilities": [
+            "text",
+            "audio_input",
+            "speech_to_text",
+            "audio_output",
+            "text_to_speech",
+            "vision",
+            "image_upload",
+            "location",
+            "timezone",
+            "battery",
+            "health",
+            "telemetry"
+          ],
+          "telemetryScopes": [
+            "location",
+            "timezone",
+            "battery",
+            "health",
+            "device",
+            "status"
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+For local POC work, `auth.mode: "api_key"` is acceptable. For higher-trust
+deployments, use `auth.mode: "mtls"` with a client certificate binding, and put
+PSFN behind a trusted TLS edge that strips untrusted client certificate headers
+before forwarding. The framework currently validates cert identity from trusted
+forwarded headers plus API-key principal identity.
+
 ## Hub Configuration
 
 The hub’s PSFN-facing identity is configured in `.env`. These values become the
-registry claim envelope sent to PSFN:
+registered identity and claim headers sent to PSFN:
 
 ```dotenv
 AGENT_RUNTIME=psfn
@@ -59,26 +177,52 @@ PSFN_MODEL=psfn
 PSFN_API_KEY=
 
 PSFN_CLAIM_NAMESPACE=satellite.endpoint
-PSFN_CLAIM_TYPE=voice-only
+PSFN_CLAIM_TYPE=mobile-location
 PSFN_CHANNEL_TYPE=satellite.endpoint
-PSFN_CAPABILITY_PROFILE=voice-only
-PSFN_SATELLITE_ID=kitchen-pi
-PSFN_ENDPOINT_ID=kitchen-pi-realtime
-PSFN_ENDPOINT_NAME=Kitchen Pi
-PSFN_ENDPOINT_CLASS=voice
-PSFN_LOCATION_MODE=static
-PSFN_TELEMETRY_MODE=disabled
-PSFN_TELEMETRY_CATEGORIES=
+PSFN_CAPABILITY_PROFILE=mobile-location
+PSFN_SATELLITE_ID=amica-android
+PSFN_ENDPOINT_ID=amica-android-app
+PSFN_ENDPOINT_NAME=Amica Android App
+PSFN_ENDPOINT_CLASS=mobile
+PSFN_LOCATION_MODE=mobile
+PSFN_TELEMETRY_MODE=event
+PSFN_TELEMETRY_CATEGORIES=location,timezone,battery,health
 
 PSFN_CLIENT_CERT_PATH=
 PSFN_CLIENT_KEY_PATH=
 PSFN_CA_CERT_PATH=
 ```
 
+For a speech-only Pi, use the same shape with `voice-only`, `kitchen-pi`, and
+`kitchen-pi-realtime`. Keep `PSFN_CLAIM_TYPE`, `PSFN_CAPABILITY_PROFILE`,
+`PSFN_SATELLITE_ID`, and `PSFN_ENDPOINT_ID` aligned with the PSFN
+`satellites.json` entry.
+
 For high-trust registered endpoints, configure `PSFN_CLIENT_CERT_PATH` and
 `PSFN_CLIENT_KEY_PATH` so the hub presents client certificate identity to PSFN.
 The satellite itself connects to the hub over the local hub transport; the hub
 is the component that authenticates to PSFN.
+
+## Hub To PSFN Headers
+
+When the hub calls PSFN, it sends these registry-protocol headers:
+
+```text
+X-PSFN-Satellite-Claim-Type
+X-PSFN-Satellite-ID
+X-PSFN-Satellite-Endpoint-ID
+X-PSFN-Satellite-Session-ID
+X-PSFN-Satellite-Thread-ID
+X-PSFN-Satellite-Capabilities
+X-PSFN-Satellite-Telemetry-Scopes
+X-PSFN-Client-Cert-Fingerprint-SHA256
+```
+
+`X-PSFN-Client-Cert-Fingerprint-SHA256` is only present when client certificate
+config is available. `X-PSFN-Satellite-Capabilities` is the current satellite
+capability set mapped to PSFN's canonical vocabulary. Empty telemetry categories
+produce no telemetry scope header; PSFN treats omitted telemetry as no telemetry,
+not as permission to use all registry scopes.
 
 ## WebSocket Connection
 
@@ -135,6 +279,29 @@ Voice endpoint example:
 }
 ```
 
+Android/Amica speech-first example:
+
+```json
+{
+  "type": "hello",
+  "deviceId": "amica-android",
+  "deviceName": "Amica Android",
+  "sessionId": "mobile:weekend-walk",
+  "satelliteId": "amica-android",
+  "satelliteName": "Amica Android",
+  "capabilities": {
+    "input": ["microphone_pcm", "final_transcript", "text", "wake_event"],
+    "output": ["text", "subtitle", "streamed_audio"],
+    "control": ["interrupt", "presence", "session_attach"],
+    "safety": ["confirmation_required"]
+  }
+}
+```
+
+Add `vision_upload` to `capabilities.input` only after the app and hub path can
+actually upload images for the current turn. Do not advertise vision just
+because the phone has a camera.
+
 The hub replies with `hello.ack` containing the resolved session, channel, and
 normalized capabilities. Treat that as the authoritative hub-side attachment for
 the current connection.
@@ -185,7 +352,7 @@ Handle these hub messages:
 If the satellite does not advertise `streamed_audio`, it should ignore audio
 lifecycle events and render text/subtitles only.
 
-## Capability Vocabulary
+## Satellite WebSocket Capability Vocabulary
 
 Allowed capability values are defined in `src/ts/shared/protocol.ts`.
 
@@ -217,11 +384,31 @@ Prefer smaller capability sets. For example, a Device Studio simulator should
 not advertise `vision_upload`, `action`, `servo`, or `streamed_audio` unless the
 corresponding path is implemented and working.
 
+## PSFN Capability Mapping
+
+The hub maps WebSocket capabilities into PSFN framework capabilities before
+sending the registry headers:
+
+| Hub capability | PSFN capability |
+| --- | --- |
+| `input: text` or `output: text/subtitle` | `text` |
+| `input: microphone_pcm` or `wake_event` | `audio_input` |
+| `input: final_transcript` | `speech_to_text` |
+| `output: streamed_audio` or `local_file_audio` | `audio_output`, `text_to_speech` |
+| `input: vision_upload` | `vision`, `image_upload` |
+| `output: animation`, `expression`, `action`, or `gaze` | `avatar` |
+| `output: expression` | `avatar_expression` |
+| `output: action` | `avatar_action` |
+
+Presence is currently a telemetry/control signal, not a framework capability
+grant. Do not rely on `control: presence` to grant `presence` as a PSFN
+capability.
+
 ## Telemetry
 
-Telemetry is currently advertised through hub configuration and the PSFN claim
-envelope, not through a separate satellite WebSocket message. Do not invent
-custom telemetry frames until the shared protocol defines them.
+Telemetry is currently advertised through hub configuration and PSFN registry
+headers, not through a separate satellite WebSocket message. Do not invent custom
+telemetry frames until the shared protocol defines them.
 
 Supported telemetry categories for the claim envelope are:
 
@@ -229,8 +416,35 @@ Supported telemetry categories for the claim envelope are:
 location, timezone, room, presence, battery, health, device_status, avatar_state
 ```
 
+Mapping to PSFN framework telemetry scopes:
+
+| Hub telemetry category | PSFN telemetry scope |
+| --- | --- |
+| `location` | `location` |
+| `timezone` | `timezone` |
+| `presence` | `presence` |
+| `battery` | `battery` |
+| `health` | `health` |
+| `device_status` | `device`, `status` |
+| `avatar_state` | `status` |
+| `room` | no framework scope yet |
+
 Use `PSFN_TELEMETRY_MODE=disabled` by default. Enable telemetry only for
 endpoints that are configured to provide it and whose registry entry permits it.
+
+## Amica Alignment Checklist
+
+Use this checklist when wiring the Amica prototype or another companion client
+through the hub:
+
+- Pick stable IDs first: `PSFN_SATELLITE_ID`, `PSFN_ENDPOINT_ID`, and WebSocket `sessionId`.
+- Add the matching PSFN `satellites.json` registry entry before testing the app.
+- Configure the hub `.env` to match the registry claim type, satellite ID, and endpoint ID exactly.
+- Start with speech only: microphone PCM or local STT transcript in, streamed audio/text out.
+- Advertise `vision_upload` only after the app has a real image upload path through the hub.
+- Keep PSFN secrets and client cert paths in hub `.env`, never in the Android app.
+- Treat hub `hello.ack` as the accepted connection state and surface `error-event` visibly in the app.
+- Verify that PSFN sees source `satellite`, channel ID `satellite:<claimType>:<sessionId>`, and the expected effective capabilities.
 
 ## Minimal JavaScript Satellite
 

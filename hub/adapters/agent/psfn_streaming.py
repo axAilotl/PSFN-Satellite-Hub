@@ -13,6 +13,7 @@ from hub.satellite_claims import (
     ClientCertificateConfig,
     SatelliteClaimConfig,
     build_satellite_claim_envelope,
+    build_satellite_registry_headers,
     derive_channel_id,
     normalize_claim_config,
 )
@@ -221,6 +222,12 @@ class PsfnStreamingProvider:
             headers["X-PSFN-Channel-ID"] = channel_id
             headers["X-PSFN-Satellite-ID"] = self._claim_config.satellite_id
             headers["X-PSFN-Satellite-Name"] = self._claim_config.display_name
+            headers.update(
+                build_satellite_registry_headers(
+                    config=self._claim_config,
+                    satellite_claim=satellite_claim,
+                ),
+            )
             headers["X-PSFN-Satellite-Claim"] = json.dumps(satellite_claim, separators=(",", ":"))
             headers["X-PSFN-Channel-Metadata"] = json.dumps(
                 {

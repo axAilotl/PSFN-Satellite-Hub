@@ -39,6 +39,38 @@ export type SatelliteTelemetryCategory =
   | "device_status"
   | "avatar_state";
 
+export type FrameworkSatelliteCapability =
+  | "text"
+  | "audio_input"
+  | "speech_to_text"
+  | "audio_output"
+  | "text_to_speech"
+  | "vision"
+  | "image_upload"
+  | "avatar"
+  | "avatar_expression"
+  | "avatar_action"
+  | "location"
+  | "timezone"
+  | "presence"
+  | "health"
+  | "battery"
+  | "telemetry"
+  | "outbound_delivery"
+  | "robotics";
+
+export type FrameworkSatelliteTelemetryScope =
+  | "location"
+  | "timezone"
+  | "presence"
+  | "health"
+  | "battery"
+  | "network"
+  | "orientation"
+  | "ambient"
+  | "device"
+  | "status";
+
 export interface SatelliteTelemetryConfig {
   mode: SatelliteTelemetryMode;
   categories: SatelliteTelemetryCategory[];
@@ -155,8 +187,8 @@ export const CAPABILITY_PROFILE_DEFAULTS: Record<SatelliteCapabilityProfile, Pro
     endpointClass: "mobile",
     locationMode: "mobile",
     capabilities: {
-      input: ["text"],
-      output: ["text", "subtitle"],
+      input: ["microphone_pcm", "final_transcript", "text", "vision_upload", "wake_event"],
+      output: ["text", "subtitle", "streamed_audio"],
       control: ["interrupt", "presence", "session_attach"],
       safety: ["confirmation_required"],
     },
@@ -239,6 +271,97 @@ export function buildSatelliteClaimEnvelope(input: {
       ...(fingerprint ? { clientCertificateFingerprintSha256: fingerprint } : {}),
     },
   };
+}
+
+export function buildSatelliteRegistryHeaders(input: {
+  config: PsfnSatelliteClaimConfig;
+  satelliteClaim: SatelliteClaimEnvelope;
+}): Record<string, string> {
+  const capabilities = frameworkCapabilitiesForSatelliteCapabilities(input.satelliteClaim.capabilities.current);
+  const telemetryScopes = frameworkTelemetryScopesForConfig(input.config.telemetry);
+  const headers: Record<string, string> = {
+    "X-PSFN-Satellite-Claim-Type": input.config.type,
+    "X-PSFN-Satellite-ID": input.config.satelliteId,
+    "X-PSFN-Satellite-Endpoint-ID": input.config.endpointId,
+    "X-PSFN-Satellite-Session-ID": input.satelliteClaim.claim.sessionId,
+    "X-PSFN-Satellite-Thread-ID": input.satelliteClaim.claim.threadId,
+  };
+  if (capabilities.length) {
+    headers["X-PSFN-Satellite-Capabilities"] = capabilities.join(",");
+  }
+  if (telemetryScopes.length) {
+    headers["X-PSFN-Satellite-Telemetry-Scopes"] = telemetryScopes.join(",");
+  }
+  if (input.satelliteClaim.auth.clientCertificateFingerprintSha256) {
+    headers["X-PSFN-Client-Cert-Fingerprint-SHA256"] = input.satelliteClaim.auth.clientCertificateFingerprintSha256;
+  }
+  return headers;
+}
+
+export function frameworkCapabilitiesForSatelliteCapabilities(
+  capabilities: SatelliteCapabilities,
+): FrameworkSatelliteCapability[] {
+  const input = new Set(capabilities.input ?? []);
+  const output = new Set(capabilities.output ?? []);
+  const mapped = new Set<FrameworkSatelliteCapability>();
+
+  if (input.has("text") || output.has("text") || output.has("subtitle")) {
+    mapped.add("text");
+  }
+  if (input.has("microphone_pcm") || input.has("wake_event")) {
+    mapped.add("audio_input");
+  }
+  if (input.has("final_transcript")) {
+    mapped.add("speech_to_text");
+  }
+  if (output.has("streamed_audio") || output.has("local_file_audio")) {
+    mapped.add("audio_output");
+    mapped.add("text_to_speech");
+  }
+  if (input.has("vision_upload")) {
+    mapped.add("vision");
+    mapped.add("image_upload");
+  }
+  if (output.has("animation") || output.has("expression") || output.has("action") || output.has("gaze")) {
+    mapped.add("avatar");
+  }
+  if (output.has("expression")) {
+    mapped.add("avatar_expression");
+  }
+  if (output.has("action")) {
+    mapped.add("avatar_action");
+  }
+  return [...mapped];
+}
+
+export function frameworkTelemetryScopesForConfig(
+  telemetry: SatelliteTelemetryConfig,
+): FrameworkSatelliteTelemetryScope[] {
+  if (telemetry.mode === "disabled") {
+    return [];
+  }
+  const mapped = new Set<FrameworkSatelliteTelemetryScope>();
+  for (const category of telemetry.categories) {
+    switch (category) {
+      case "location":
+      case "timezone":
+      case "presence":
+      case "battery":
+      case "health":
+        mapped.add(category);
+        break;
+      case "device_status":
+        mapped.add("device");
+        mapped.add("status");
+        break;
+      case "avatar_state":
+        mapped.add("status");
+        break;
+      case "room":
+        break;
+    }
+  }
+  return [...mapped];
 }
 
 function cloneCapabilities(capabilities: Required<SatelliteCapabilities>): Required<SatelliteCapabilities> {

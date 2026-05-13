@@ -72,7 +72,12 @@ test("psfn model adapter sends embodied hub channel headers", async () => {
     assert.equal(capturedHeaders.Authorization, "Bearer secret");
     assert.equal(capturedHeaders["X-PSFN-Channel-Type"], "satellite.endpoint");
     assert.equal(capturedHeaders["X-PSFN-Channel-ID"], "satellite.endpoint:thin-shell:demo");
-    assert.equal(capturedHeaders["X-PSFN-Satellite-ID"], "thin-shell");
+    assert.equal(capturedHeaders["X-PSFN-Satellite-Claim-Type"], "text-only");
+    assert.equal(capturedHeaders["X-PSFN-Satellite-ID"], "hub-thin-shell");
+    assert.equal(capturedHeaders["X-PSFN-Satellite-Endpoint-ID"], "thin-shell");
+    assert.equal(capturedHeaders["X-PSFN-Satellite-Session-ID"], "thin-shell:demo");
+    assert.equal(capturedHeaders["X-PSFN-Satellite-Thread-ID"], "thin-shell:demo");
+    assert.equal(capturedHeaders["X-PSFN-Satellite-Capabilities"], "text");
     assert.equal(capturedHeaders["X-PSFN-Satellite-Name"], "Thin Shell");
     assert.equal(capturedBody.user, "thin-shell:demo");
     assert.deepEqual(capturedBody.messages, [{ role: "user", content: "hello" }]);
