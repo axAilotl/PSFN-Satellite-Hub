@@ -3,9 +3,9 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "opanhome-hub"
+name = "psfn-satellite-hub"
 version = "0.1.0"
-description = "ESPHome-native voice hub scaffold for opanhome"
+description = "PSFN satellite voice and embodiment hub"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

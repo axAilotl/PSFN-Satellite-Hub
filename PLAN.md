@@ -27,7 +27,7 @@ Satellites provide embodied I/O:
 - `psfn-vrm` as the thinnest visual/test surface for the MVP.
 - Amica as the richer avatar surface when available.
 - VaM/Voxta as a VR embodiment and action/vision/playback surface.
-- ESPHome and Pi/OpenHome-style devices as mic/speaker satellites.
+- ESPHome and Pi/PSFN realtime devices as mic/speaker satellites.
 - Future Live2D, robot head, browser avatar, or custom hardware adapters.
 
 Shared services provide reusable voice and media capability:
@@ -70,7 +70,7 @@ MVP behavior:
 - A hub session can be created and assigned a stable embodied session id.
 - A PSFN-backed agent turn can be streamed through the hub.
 - A satellite can attach, receive assistant text deltas, and render final state.
-- Voice input can come from the existing realtime Pi/OpenHome path or typed text.
+- Voice input can come from the existing realtime Pi/PSFN path or typed text.
 - TTS can run through the shared provider layer, with graceful fallback to text
   captions when audio is unavailable.
 - Interrupts cancel active audio and stop or supersede the current assistant
@@ -124,7 +124,7 @@ The adapter should provide a Voxta-compatible facade:
 - Strictly allowlisted `appTrigger` and action support.
 
 VaM does not need to own microphone input. It can render the embodied response
-while another satellite, such as the Pi/OpenHome realtime client, provides mic
+while another satellite, such as the Pi/PSFN realtime client, provides mic
 input and barge-in.
 
 ## Open Runtime Support
@@ -161,4 +161,4 @@ Start by defining the typed hub protocol and embodied session registry around
 the existing TypeScript realtime server. Then implement one thin visual
 satellite, preferably `psfn-vrm`, and keep Amica as the richer compatibility
 target. Once that is stable, add the VaM/Voxta satellite facade and route
-OpenHome/Pi voice ingress into the same session.
+PSFN/Pi voice ingress into the same session.

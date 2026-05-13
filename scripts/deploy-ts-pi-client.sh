@@ -58,7 +58,7 @@ fi
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
-ENV_FILE="${TMP_DIR}/opanhome-ts-client.env"
+ENV_FILE="${TMP_DIR}/psfn-ts-client.env"
 cat > "${ENV_FILE}" <<EOF
 HUB_WS_URL=${HUB_WS_URL}
 DEVICE_ID=${DEVICE_ID}
@@ -153,7 +153,7 @@ expect {
 EOF
 }
 
-REMOTE_DIR="/home/${PI_USER}/opanhome-ts-client"
+REMOTE_DIR="/home/${PI_USER}/psfn-ts-client"
 
 expect_ssh "mkdir -p ${REMOTE_DIR}/src ${REMOTE_DIR}/client/ts_realtime"
 expect_scp \
@@ -175,14 +175,14 @@ if ! command -v node >/dev/null 2>&1; then
   printf '%s\n' '${PI_PASSWORD}' | sudo -S apt-get install -y nodejs npm ffmpeg alsa-utils
 fi
 npm install
-printf '%s\n' '${PI_PASSWORD}' | sudo -S install -m 0644 ${REMOTE_DIR}/pi-ts-client.service /etc/systemd/system/opanhome-ts-client.service
-printf '%s\n' '${PI_PASSWORD}' | sudo -S sed -i 's/%i/${PI_USER}/g' /etc/systemd/system/opanhome-ts-client.service
-printf '%s\n' '${PI_PASSWORD}' | sudo -S install -m 0644 ${REMOTE_DIR}/opanhome-ts-client.env /etc/opanhome-ts-client.env
+printf '%s\n' '${PI_PASSWORD}' | sudo -S install -m 0644 ${REMOTE_DIR}/pi-ts-client.service /etc/systemd/system/psfn-ts-client.service
+printf '%s\n' '${PI_PASSWORD}' | sudo -S sed -i 's/%i/${PI_USER}/g' /etc/systemd/system/psfn-ts-client.service
+printf '%s\n' '${PI_PASSWORD}' | sudo -S install -m 0644 ${REMOTE_DIR}/psfn-ts-client.env /etc/psfn-ts-client.env
 printf '%s\n' '${PI_PASSWORD}' | sudo -S systemctl daemon-reload
 printf '%s\n' '${PI_PASSWORD}' | sudo -S systemctl disable --now linux-voice-assistant.service || true
-printf '%s\n' '${PI_PASSWORD}' | sudo -S systemctl enable opanhome-ts-client.service
-printf '%s\n' '${PI_PASSWORD}' | sudo -S systemctl restart opanhome-ts-client.service
-systemctl is-active opanhome-ts-client.service
+printf '%s\n' '${PI_PASSWORD}' | sudo -S systemctl enable psfn-ts-client.service
+printf '%s\n' '${PI_PASSWORD}' | sudo -S systemctl restart psfn-ts-client.service
+systemctl is-active psfn-ts-client.service
 EOF
 )"
 

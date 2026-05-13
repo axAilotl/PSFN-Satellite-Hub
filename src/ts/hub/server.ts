@@ -74,7 +74,7 @@ export class RealtimeHubServer {
         return;
       }
       response.statusCode = 200;
-      response.end("opanhome-ts-hub\n");
+      response.end("psfn-satellite-hub\n");
     });
   }
 

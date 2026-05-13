@@ -10,7 +10,7 @@ class ESPHomeTarget:
     password: str | None = None
     noise_psk: str | None = None
     expected_name: str | None = None
-    client_info: str = "opanhome-hub"
+    client_info: str = "psfn-satellite-hub"
     timezone: str = "America/New_York"
 
 

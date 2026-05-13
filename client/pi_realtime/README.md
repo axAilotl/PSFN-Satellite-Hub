@@ -21,16 +21,16 @@ PI_USER=<pi-user> PI_PASSWORD='<pi-password>' HUB_WS_URL=ws://<hub-host>:8787/ D
 
 That script:
 
-- copies [client.py](/mnt/samesung/ai/dev/opanhome/client/pi_realtime/client.py) to the Pi
+- copies `client/pi_realtime/client.py` to the Pi
 - installs `websockets` into the existing Pi venv
-- writes `/etc/opanhome-realtime-client.env`
-- installs `opanhome-realtime-client.service`
+- writes `/etc/psfn-realtime-client.env`
+- installs `psfn-realtime-client.service`
 - disables `linux-voice-assistant.service`
 - enables the realtime client service
 
 ## Runtime Contract
 
-The client speaks the websocket protocol documented in [docs/realtime-client-protocol.md](/mnt/samesung/ai/dev/opanhome/docs/realtime-client-protocol.md).
+The client speaks the websocket protocol documented in `docs/realtime-client-protocol.md`.
 
 Key behaviors:
 

@@ -61,7 +61,7 @@ fi
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
-ENV_FILE="${TMP_DIR}/opanhome-realtime-client.env"
+ENV_FILE="${TMP_DIR}/psfn-realtime-client.env"
 cat > "${ENV_FILE}" <<EOF
 HUB_WS_URL=${HUB_WS_URL}
 DEVICE_ID=${DEVICE_ID}
@@ -139,7 +139,7 @@ expect {
 EOF
 }
 
-REMOTE_DIR="/home/${PI_USER}/opanhome-realtime-client"
+REMOTE_DIR="/home/${PI_USER}/psfn-realtime-client"
 
 expect_ssh "mkdir -p ${REMOTE_DIR}"
 expect_scp \
@@ -152,16 +152,16 @@ expect_scp \
 REMOTE_SCRIPT="$(cat <<EOF
 set -e
 /home/${PI_USER}/linux-voice-assistant/.venv/bin/pip install websockets
-printf '%s\n' '${PI_PASSWORD}' | sudo -S install -m 0644 ${REMOTE_DIR}/pi-realtime-client.service /etc/systemd/system/opanhome-realtime-client.service
-printf '%s\n' '${PI_PASSWORD}' | sudo -S install -m 0644 ${REMOTE_DIR}/opanhome-realtime-client.env /etc/opanhome-realtime-client.env
+printf '%s\n' '${PI_PASSWORD}' | sudo -S install -m 0644 ${REMOTE_DIR}/pi-realtime-client.service /etc/systemd/system/psfn-realtime-client.service
+printf '%s\n' '${PI_PASSWORD}' | sudo -S install -m 0644 ${REMOTE_DIR}/psfn-realtime-client.env /etc/psfn-realtime-client.env
 printf '%s\n' '${PI_PASSWORD}' | sudo -S systemctl daemon-reload
 printf '%s\n' '${PI_PASSWORD}' | sudo -S systemctl disable --now linux-voice-assistant.service || true
-printf '%s\n' '${PI_PASSWORD}' | sudo -S systemctl enable opanhome-realtime-client.service
-printf '%s\n' '${PI_PASSWORD}' | sudo -S systemctl restart opanhome-realtime-client.service
+printf '%s\n' '${PI_PASSWORD}' | sudo -S systemctl enable psfn-realtime-client.service
+printf '%s\n' '${PI_PASSWORD}' | sudo -S systemctl restart psfn-realtime-client.service
 systemctl is-enabled linux-voice-assistant.service || true
 systemctl is-active linux-voice-assistant.service || true
-systemctl is-enabled opanhome-realtime-client.service
-systemctl is-active opanhome-realtime-client.service
+systemctl is-enabled psfn-realtime-client.service
+systemctl is-active psfn-realtime-client.service
 EOF
 )"
 

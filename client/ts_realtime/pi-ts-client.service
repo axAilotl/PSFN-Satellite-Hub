@@ -1,5 +1,5 @@
 [Unit]
-Description=Opanhome TypeScript Realtime Voice Client
+Description=PSFN TypeScript Realtime Voice Client
 After=network-online.target sound.target lightdm.service
 Wants=network-online.target lightdm.service
 PartOf=lightdm.service
@@ -7,8 +7,8 @@ PartOf=lightdm.service
 [Service]
 Type=simple
 User=%i
-WorkingDirectory=/home/%i/opanhome-ts-client
-EnvironmentFile=/etc/opanhome-ts-client.env
+WorkingDirectory=/home/%i/psfn-ts-client
+EnvironmentFile=/etc/psfn-ts-client.env
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
 Environment=PULSE_SERVER=/run/user/1000/pulse/native

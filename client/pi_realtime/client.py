@@ -18,13 +18,13 @@ import numpy as np
 
 # soundcard currently assumes argv[1] exists when inferring a Pulse client name.
 if len(sys.argv) < 2:
-    sys.argv.append("opanhome-realtime-client")
+    sys.argv.append("psfn-realtime-client")
 
 import soundcard as sc
 import websockets
 from websockets.exceptions import ConnectionClosed
 
-LOG = logging.getLogger("opanhome_realtime_client")
+LOG = logging.getLogger("psfn_realtime_client")
 
 
 @dataclass(slots=True)
