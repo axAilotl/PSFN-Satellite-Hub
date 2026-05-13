@@ -6,6 +6,7 @@ import type { ConversationMessage } from "./session-store.js";
 import type { PsfnChannelContext } from "./embodied-session.js";
 import type { AgentRuntimeAdapter } from "./agent-runtime.js";
 import type { PsfnRuntimeConfig } from "../shared/env.js";
+import type { RuntimeIdentity } from "../shared/protocol.js";
 import {
   buildSatelliteClaimEnvelope,
   buildSatelliteRegistryHeaders,
@@ -27,6 +28,7 @@ const DEFAULT_SYSTEM_PROMPT =
 
 export class PsfnModelAdapter implements AgentRuntimeAdapter {
   private readonly apiBaseUrl: string;
+  private identityRequest: Promise<RuntimeIdentity | null> | null = null;
 
   constructor(private readonly runtime: PsfnRuntimeConfig) {
     const baseUrl = runtime.baseUrl.replace(/\/$/, "");
@@ -78,6 +80,37 @@ export class PsfnModelAdapter implements AgentRuntimeAdapter {
   }
 
   async close(): Promise<void> {}
+
+  async getIdentity(): Promise<RuntimeIdentity | null> {
+    this.identityRequest ??= this.fetchIdentity();
+    return this.identityRequest;
+  }
+
+  private async fetchIdentity(): Promise<RuntimeIdentity | null> {
+    const response = await fetch(`${this.apiBaseUrl}/identity`, {
+      method: "GET",
+      headers: this.buildIdentityHeaders(),
+    });
+    if (response.status === 404) {
+      return null;
+    }
+    if (!response.ok) {
+      console.warn(`PSFN identity endpoint failed (${response.status})`);
+      return null;
+    }
+    const payload = await response.json().catch(() => null);
+    return extractRuntimeIdentity(payload);
+  }
+
+  private buildIdentityHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+    };
+    if (this.runtime.apiKey) {
+      headers.Authorization = `Bearer ${this.runtime.apiKey}`;
+    }
+    return headers;
+  }
 
   private async postChatCompletion(headers: Record<string, string>, body: string): Promise<CompletionResponse> {
     const url = `${this.apiBaseUrl}/chat/completions`;
@@ -228,6 +261,56 @@ function extractCompletionText(payload: string): string {
   if (typeof firstChoice.message?.content === "string") return firstChoice.message.content;
   if (typeof firstChoice.text === "string") return firstChoice.text;
   return "";
+}
+
+function extractRuntimeIdentity(payload: unknown): RuntimeIdentity | null {
+  if (!isRecord(payload)) return null;
+
+  const companion = isRecord(payload.companion) ? payload.companion : undefined;
+  const channels = isRecord(payload.channels) ? payload.channels : undefined;
+  const psfnAmica = channels && isRecord(channels["psfn-amica"])
+    ? channels["psfn-amica"]
+    : undefined;
+  const user = psfnAmica && isRecord(psfnAmica.user)
+    ? psfnAmica.user
+    : undefined;
+
+  const companionName = readString(companion?.name);
+  const companionId = readString(companion?.id);
+  const userName = readString(user?.name);
+  const userId = readString(user?.id);
+  const canonicalContactId = readString(psfnAmica?.canonicalContactId);
+
+  const identity: RuntimeIdentity = {
+    source: "framework",
+    ...(companionName || companionId
+      ? {
+        companion: {
+          ...(companionId ? { id: companionId } : {}),
+          ...(companionName ? { name: companionName } : {}),
+        },
+      }
+      : {}),
+    ...(userName || userId || canonicalContactId
+      ? {
+        user: {
+          ...(userId ? { id: userId } : {}),
+          ...(userName ? { name: userName } : {}),
+          ...(canonicalContactId ? { canonicalContactId } : {}),
+        },
+      }
+      : {}),
+  };
+
+  return identity.companion || identity.user ? identity : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 async function formatError(response: CompletionResponse): Promise<string> {

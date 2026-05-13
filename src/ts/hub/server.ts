@@ -10,6 +10,7 @@ import {
   encodeAudioChunk,
   type ClientToHubMessage,
   type HubToClientMessage,
+  type RuntimeIdentity,
   type SatelliteCapabilities,
 } from "../shared/protocol.js";
 import {
@@ -164,6 +165,7 @@ class RealtimeConnection {
   private replySequence = 0;
   private replyTask: Promise<void> | null = null;
   private messageChain: Promise<void> = Promise.resolve();
+  private identityTask: Promise<RuntimeIdentity | undefined> | null = null;
 
   constructor(
     private readonly socket: WebSocket,
@@ -223,6 +225,7 @@ class RealtimeConnection {
       deviceName: this.deviceName,
       satelliteId: this.satelliteId,
       audioFormat: "pcm_s16le_16000_mono_in/mp3_44100_out",
+      identity: await this.resolveRuntimeIdentity(),
     });
   }
 
@@ -246,6 +249,7 @@ class RealtimeConnection {
           satelliteId: this.satelliteId,
           satelliteName: this.satelliteName,
           capabilities: this.capabilities,
+          identity: await this.resolveRuntimeIdentity(),
         });
         await this.send({
           type: "status",
@@ -282,6 +286,23 @@ class RealtimeConnection {
           type: "error-event",
           data: { message: `Unsupported message type: ${String((message as { type?: string }).type || "")}` },
         });
+    }
+  }
+
+  private async resolveRuntimeIdentity(): Promise<RuntimeIdentity | undefined> {
+    this.identityTask ??= this.loadRuntimeIdentity();
+    return this.identityTask;
+  }
+
+  private async loadRuntimeIdentity(): Promise<RuntimeIdentity | undefined> {
+    if (!this.agent.getIdentity) {
+      return undefined;
+    }
+    try {
+      return await this.agent.getIdentity() ?? undefined;
+    } catch (error) {
+      console.warn("Unable to load PSFN runtime identity:", error);
+      return undefined;
     }
   }
 

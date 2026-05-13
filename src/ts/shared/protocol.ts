@@ -97,6 +97,7 @@ export interface SessionReadyMessage {
   deviceName: string;
   satelliteId: string;
   audioFormat: string;
+  identity?: RuntimeIdentity;
 }
 
 export interface HelloAckMessage {
@@ -108,6 +109,7 @@ export interface HelloAckMessage {
   satelliteId: string;
   satelliteName: string;
   capabilities: SatelliteCapabilities;
+  identity?: RuntimeIdentity;
 }
 
 export interface StatusMessage {
@@ -219,6 +221,21 @@ export interface SatelliteCapabilities {
   output?: SatelliteOutputCapability[];
   control?: SatelliteControlCapability[];
   safety?: SatelliteSafetyCapability[];
+}
+
+export interface RuntimeParticipantIdentity {
+  id?: string;
+  name?: string;
+}
+
+export interface RuntimeUserIdentity extends RuntimeParticipantIdentity {
+  canonicalContactId?: string;
+}
+
+export interface RuntimeIdentity {
+  companion?: RuntimeParticipantIdentity;
+  user?: RuntimeUserIdentity;
+  source: "framework" | "configured";
 }
 
 export function encodeAudioChunk(chunk: Buffer): string {
