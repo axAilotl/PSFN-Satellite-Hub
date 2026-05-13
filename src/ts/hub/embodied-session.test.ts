@@ -8,7 +8,7 @@ import {
 } from "./embodied-session.js";
 
 test("embodied session registry derives one stable PSFN hub channel", () => {
-  const registry = new EmbodiedSessionRegistry("psfn-satellite-hub");
+  const registry = new EmbodiedSessionRegistry();
 
   const first = registry.attachSatellite({
     sessionId: "thin-shell:demo",
@@ -22,7 +22,7 @@ test("embodied session registry derives one stable PSFN hub channel", () => {
     satelliteName: "Pi Mic",
   });
 
-  assert.equal(first.session.channelId, "psfn-satellite-hub:thin-shell:demo");
+  assert.equal(first.session.channelId, "satellite.endpoint:thin-shell:demo");
   assert.equal(second.session.channelId, first.session.channelId);
   assert.deepEqual(
     registry.getContext("thin-shell:demo", "thin-shell").activeSatellites.map((satellite) => satellite.id),

@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from hub.adapters.agent.psfn_streaming import PsfnStreamingProvider
+from hub.satellite_claims import normalize_claim_config
 
 
 @pytest.mark.anyio
@@ -19,6 +20,9 @@ async def test_psfn_streaming_provider_streams_deltas_and_persists_history() -> 
         request_headers.append({
             "x-psfn-channel-type": request.headers.get("x-psfn-channel-type", ""),
             "x-psfn-channel-id": request.headers.get("x-psfn-channel-id", ""),
+            "x-psfn-satellite-id": request.headers.get("x-psfn-satellite-id", ""),
+            "x-psfn-satellite-name": request.headers.get("x-psfn-satellite-name", ""),
+            "x-psfn-satellite-claim": request.headers.get("x-psfn-satellite-claim", ""),
             "x-psfn-author-id": request.headers.get("x-psfn-author-id", ""),
             "x-psfn-author-name": request.headers.get("x-psfn-author-name", ""),
         })
@@ -53,6 +57,12 @@ async def test_psfn_streaming_provider_streams_deltas_and_persists_history() -> 
         api_base_url="http://psfn.test/v1",
         api_key=None,
         model_name="psfn",
+        claim_config=normalize_claim_config(
+            capability_profile="voice-only",
+            satellite_id="pi-w",
+            endpoint_id="pi-w-realtime",
+            display_name="Pi West",
+        ),
         client=client,
     )
 
@@ -67,9 +77,24 @@ async def test_psfn_streaming_provider_streams_deltas_and_persists_history() -> 
     assert requests[0]["response_style"] == "concise"
     assert requests[0]["user"] == "realtime:pi-w"
     assert requests[0]["messages"] == [{"role": "user", "content": "hello"}]
+    assert requests[0]["satellite_claim"]["claim"] == {
+        "namespace": "satellite.endpoint",
+        "type": "voice-only",
+        "satelliteId": "pi-w",
+        "endpointId": "pi-w-realtime",
+        "sessionId": "realtime:pi-w",
+        "threadId": "realtime:pi-w",
+        "channelId": "satellite.endpoint:realtime:pi-w",
+        "deviceClass": "voice",
+        "displayName": "Pi West",
+        "locationMode": "static",
+    }
     assert request_headers[0] == {
-        "x-psfn-channel-type": "openhome",
-        "x-psfn-channel-id": "openhome:realtime:pi-w",
+        "x-psfn-channel-type": "satellite.endpoint",
+        "x-psfn-channel-id": "satellite.endpoint:realtime:pi-w",
+        "x-psfn-satellite-id": "pi-w",
+        "x-psfn-satellite-name": "Pi West",
+        "x-psfn-satellite-claim": json.dumps(requests[0]["satellite_claim"], separators=(",", ":")),
         "x-psfn-author-id": "",
         "x-psfn-author-name": "",
     }

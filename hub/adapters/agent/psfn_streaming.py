@@ -9,6 +9,13 @@ from typing import Any
 import httpx
 
 from hub.adapters.interfaces import AgentReply
+from hub.satellite_claims import (
+    ClientCertificateConfig,
+    SatelliteClaimConfig,
+    build_satellite_claim_envelope,
+    derive_channel_id,
+    normalize_claim_config,
+)
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -28,6 +35,8 @@ class PsfnStreamingProvider:
         api_key: str | None = None,
         author_id: str | None = None,
         author_name: str | None = None,
+        claim_config: SatelliteClaimConfig | None = None,
+        client_certificate: ClientCertificateConfig | None = None,
         client: httpx.AsyncClient | None = None,
         timeout_seconds: float = 60.0,
     ) -> None:
@@ -37,11 +46,20 @@ class PsfnStreamingProvider:
         headers: dict[str, str] = {}
         if api_key and api_key.strip():
             headers["Authorization"] = f"Bearer {api_key.strip()}"
-        self._client = client or httpx.AsyncClient(
-            base_url=base_url,
-            headers=headers,
-            timeout=httpx.Timeout(timeout_seconds, connect=10.0),
-        )
+        self._claim_config = claim_config or normalize_claim_config(tls=client_certificate)
+        client_options: dict[str, Any] = {
+            "base_url": base_url,
+            "headers": headers,
+            "timeout": httpx.Timeout(timeout_seconds, connect=10.0),
+        }
+        tls = self._claim_config.tls or client_certificate
+        if tls and tls.configured:
+            assert tls.cert_path is not None
+            assert tls.key_path is not None
+            client_options["cert"] = (str(tls.cert_path), str(tls.key_path))
+        if tls and tls.ca_path is not None:
+            client_options["verify"] = str(tls.ca_path)
+        self._client = client or httpx.AsyncClient(**client_options)
         self._owns_client = client is None
         self._request_headers = headers
         self._model_name = model_name
@@ -111,11 +129,17 @@ class PsfnStreamingProvider:
         conversation_id: str,
         stream: bool,
     ) -> str:
-        payload = self._build_payload(messages=messages, conversation_id=conversation_id, stream=stream)
+        satellite_claim = self._build_satellite_claim(conversation_id)
+        payload = self._build_payload(
+            messages=messages,
+            conversation_id=conversation_id,
+            stream=stream,
+            satellite_claim=satellite_claim,
+        )
         response = await self._client.post(
             "/chat/completions",
             json=payload,
-            headers=self._build_request_headers(conversation_id),
+            headers=self._build_request_headers(conversation_id, satellite_claim=satellite_claim),
         )
         if response.status_code >= 400:
             raise RuntimeError(_format_http_error(response))
@@ -128,12 +152,18 @@ class PsfnStreamingProvider:
         messages: list[dict[str, str]],
         conversation_id: str,
     ) -> AsyncIterator[str]:
-        payload = self._build_payload(messages=messages, conversation_id=conversation_id, stream=True)
+        satellite_claim = self._build_satellite_claim(conversation_id)
+        payload = self._build_payload(
+            messages=messages,
+            conversation_id=conversation_id,
+            stream=True,
+            satellite_claim=satellite_claim,
+        )
         async with self._client.stream(
             "POST",
             "/chat/completions",
             json=payload,
-            headers=self._build_request_headers(conversation_id),
+            headers=self._build_request_headers(conversation_id, satellite_claim=satellite_claim),
         ) as response:
             if response.status_code >= 400:
                 body = await response.aread()
@@ -158,6 +188,7 @@ class PsfnStreamingProvider:
         messages: list[dict[str, str]],
         conversation_id: str,
         stream: bool,
+        satellite_claim: dict[str, object],
     ) -> dict[str, object]:
         payload: dict[str, object] = {
             "model": self._model_name,
@@ -168,15 +199,38 @@ class PsfnStreamingProvider:
             "system_prompt": _DEFAULT_SYSTEM_PROMPT,
             "response_style": "concise",
             "user": conversation_id,
+            "satellite_claim": satellite_claim,
         }
         return payload
 
-    def _build_request_headers(self, conversation_id: str) -> dict[str, str]:
+    def _build_satellite_claim(self, conversation_id: str) -> dict[str, object]:
+        channel_id = self._derive_channel_id(conversation_id)
+        return build_satellite_claim_envelope(
+            config=self._claim_config,
+            conversation_id=conversation_id,
+            session_id=conversation_id,
+            channel_id=channel_id,
+            api_key=self._request_headers.get("Authorization"),
+        )
+
+    def _build_request_headers(self, conversation_id: str, *, satellite_claim: dict[str, object]) -> dict[str, str]:
         headers = dict(self._request_headers)
         channel_id = self._derive_channel_id(conversation_id)
         if channel_id:
-            headers["X-PSFN-Channel-Type"] = "openhome"
+            headers["X-PSFN-Channel-Type"] = self._claim_config.channel_type
             headers["X-PSFN-Channel-ID"] = channel_id
+            headers["X-PSFN-Satellite-ID"] = self._claim_config.satellite_id
+            headers["X-PSFN-Satellite-Name"] = self._claim_config.display_name
+            headers["X-PSFN-Satellite-Claim"] = json.dumps(satellite_claim, separators=(",", ":"))
+            headers["X-PSFN-Channel-Metadata"] = json.dumps(
+                {
+                    "sessionId": conversation_id,
+                    "sourceSatelliteId": self._claim_config.satellite_id,
+                    "sourceSatelliteName": self._claim_config.display_name,
+                    "satelliteClaim": satellite_claim,
+                },
+                separators=(",", ":"),
+            )
             if self._author_id and self._author_name:
                 headers["X-PSFN-Author-ID"] = self._author_id
                 headers["X-PSFN-Author-Name"] = self._author_name
@@ -186,11 +240,7 @@ class PsfnStreamingProvider:
         normalized = conversation_id.strip()
         if not normalized:
             return None
-        if normalized.startswith("openhome:"):
-            return normalized
-        if normalized.startswith("realtime:"):
-            return f"openhome:{normalized}"
-        return None
+        return derive_channel_id(self._claim_config.channel_type, normalized)
 
 
 def _normalize_history(history: list[dict[str, str]]) -> list[dict[str, str]]:

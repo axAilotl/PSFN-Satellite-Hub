@@ -255,7 +255,12 @@ Important settings for the Python ESPHome fallback path:
 - `PSFN_API_BASE_URL`
 - `PSFN_API_KEY`
 - `PSFN_MODEL`
-- `PSFN_CHANNEL_TYPE` for the TypeScript hub channel header, defaulting to `psfn-satellite-hub`
+- `PSFN_CLAIM_NAMESPACE` and `PSFN_CLAIM_TYPE` for the registry claim namespace/type, defaulting to `satellite.endpoint` and the selected capability profile
+- `PSFN_CAPABILITY_PROFILE` for the current endpoint class: `voice-only`, `text-only`, `voxta-avatar`, `vision-capable`, `telemetry-only`, or `mobile-location`
+- `PSFN_SATELLITE_ID`, `PSFN_ENDPOINT_ID`, and `PSFN_ENDPOINT_NAME` for the configured endpoint identity
+- `PSFN_CHANNEL_TYPE` for the compatibility channel header, defaulting to the claim namespace instead of an authoritative endpoint type
+- `PSFN_CLIENT_CERT_PATH`, `PSFN_CLIENT_KEY_PATH`, and optional `PSFN_CA_CERT_PATH` for PSFN client certificate identity
+- `PSFN_TELEMETRY_MODE` and `PSFN_TELEMETRY_CATEGORIES` for configured telemetry advertisement
 - `HERMES_API_BASE_URL` or `HERMES_API_SERVER_URL` for `AGENT_RUNTIME=hermes`, defaulting to `http://127.0.0.1:8642/v1`
 - `HERMES_API_KEY` or `API_SERVER_KEY` for Hermes API-server auth and stable `X-Hermes-Session-Id` continuation
 - `HERMES_MODEL` for the advertised Hermes API-server model, defaulting to `hermes-agent`

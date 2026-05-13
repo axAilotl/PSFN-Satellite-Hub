@@ -8,6 +8,7 @@ import pytest
 
 from hub.adapters.interfaces import TranscriptResult
 from hub.devices.realtime_server import _RealtimeConnection
+from hub.satellite_claims import normalize_claim_config
 from hub.storage.session_cache import SessionCache
 
 
@@ -87,6 +88,8 @@ async def test_realtime_connection_streams_text_and_audio(monkeypatch, tmp_path:
         psfn_model="model",
         psfn_author_id=None,
         psfn_author_name=None,
+        psfn_satellite_claim=normalize_claim_config(),
+        psfn_client_certificate=None,
     )
 
     await connection._handle_message({"type": "hello", "device_id": "pi-test", "device_name": "Pi Test"})

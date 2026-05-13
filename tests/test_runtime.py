@@ -20,6 +20,20 @@ def test_load_runtime_config_reads_psfn_and_project_env(tmp_path: Path, monkeypa
         "PSFN_API_BASE_URL",
         "PSFN_API_KEY",
         "PSFN_MODEL",
+        "PSFN_CLAIM_NAMESPACE",
+        "PSFN_CLAIM_TYPE",
+        "PSFN_CHANNEL_TYPE",
+        "PSFN_SATELLITE_ID",
+        "PSFN_ENDPOINT_ID",
+        "PSFN_ENDPOINT_NAME",
+        "PSFN_ENDPOINT_CLASS",
+        "PSFN_CAPABILITY_PROFILE",
+        "PSFN_LOCATION_MODE",
+        "PSFN_TELEMETRY_MODE",
+        "PSFN_TELEMETRY_CATEGORIES",
+        "PSFN_CLIENT_CERT_PATH",
+        "PSFN_CLIENT_KEY_PATH",
+        "PSFN_CA_CERT_PATH",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -46,6 +60,10 @@ def test_load_runtime_config_reads_psfn_and_project_env(tmp_path: Path, monkeypa
     assert config.psfn_api_base_url == "http://psfn.example:3100/v1"
     assert config.psfn_api_key is None
     assert config.psfn_model == "psfn"
+    assert config.psfn_satellite_claim.namespace == "satellite.endpoint"
+    assert config.psfn_satellite_claim.channel_type == "satellite.endpoint"
+    assert config.psfn_satellite_claim.capability_profile == "voice-only"
+    assert config.psfn_satellite_claim.telemetry.mode == "disabled"
     assert config.elevenlabs_model_id == "eleven_flash_v2_5"
     assert config.reply_timeout_seconds == 30.0
     assert config.voice_initial_silence_timeout_seconds == 4.0
@@ -65,6 +83,20 @@ def test_load_runtime_config_supports_realtime_mode_without_esphome_target(tmp_p
         "PSFN_API_BASE_URL",
         "PSFN_API_KEY",
         "PSFN_MODEL",
+        "PSFN_CLAIM_NAMESPACE",
+        "PSFN_CLAIM_TYPE",
+        "PSFN_CHANNEL_TYPE",
+        "PSFN_SATELLITE_ID",
+        "PSFN_ENDPOINT_ID",
+        "PSFN_ENDPOINT_NAME",
+        "PSFN_ENDPOINT_CLASS",
+        "PSFN_CAPABILITY_PROFILE",
+        "PSFN_LOCATION_MODE",
+        "PSFN_TELEMETRY_MODE",
+        "PSFN_TELEMETRY_CATEGORIES",
+        "PSFN_CLIENT_CERT_PATH",
+        "PSFN_CLIENT_KEY_PATH",
+        "PSFN_CA_CERT_PATH",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -87,6 +119,68 @@ def test_load_runtime_config_supports_realtime_mode_without_esphome_target(tmp_p
     assert config.realtime_target.public_host == "voice.example"
     assert config.psfn_api_base_url == "http://127.0.0.1:3100/v1"
     assert config.psfn_model == "psfn"
+
+
+def test_load_runtime_config_reads_satellite_claim_and_cert_settings(tmp_path: Path, monkeypatch) -> None:
+    for name in (
+        "DEVICE_TRANSPORT",
+        "DEEPGRAM_API_KEY",
+        "ELEVENLABS_API_KEY",
+        "AUDIO_PUBLIC_HOST",
+        "PSFN_API_BASE_URL",
+        "PSFN_MODEL",
+        "PSFN_CLAIM_NAMESPACE",
+        "PSFN_CLAIM_TYPE",
+        "PSFN_CHANNEL_TYPE",
+        "PSFN_SATELLITE_ID",
+        "PSFN_ENDPOINT_ID",
+        "PSFN_ENDPOINT_NAME",
+        "PSFN_ENDPOINT_CLASS",
+        "PSFN_CAPABILITY_PROFILE",
+        "PSFN_LOCATION_MODE",
+        "PSFN_TELEMETRY_MODE",
+        "PSFN_TELEMETRY_CATEGORIES",
+        "PSFN_CLIENT_CERT_PATH",
+        "PSFN_CLIENT_KEY_PATH",
+        "PSFN_CA_CERT_PATH",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    (tmp_path / "client.pem").write_text("client-cert", encoding="utf-8")
+    (tmp_path / "client.key").write_text("client-key", encoding="utf-8")
+    (tmp_path / "ca.pem").write_text("ca-cert", encoding="utf-8")
+    (tmp_path / ".env").write_text(
+        "DEVICE_TRANSPORT=realtime\n"
+        "AUDIO_PUBLIC_HOST=voice.example\n"
+        "DEEPGRAM_API_KEY=project-deepgram\n"
+        "ELEVENLABS_API_KEY=project-eleven\n"
+        "PSFN_API_BASE_URL=http://127.0.0.1:3100/v1\n"
+        "PSFN_MODEL=psfn\n"
+        "PSFN_CAPABILITY_PROFILE=mobile-location\n"
+        "PSFN_SATELLITE_ID=phone-sat\n"
+        "PSFN_ENDPOINT_ID=phone-browser\n"
+        "PSFN_ENDPOINT_NAME=Phone Browser\n"
+        "PSFN_TELEMETRY_MODE=event\n"
+        "PSFN_TELEMETRY_CATEGORIES=location,timezone,battery\n"
+        "PSFN_CLIENT_CERT_PATH=client.pem\n"
+        "PSFN_CLIENT_KEY_PATH=client.key\n"
+        "PSFN_CA_CERT_PATH=ca.pem\n",
+        encoding="utf-8",
+    )
+
+    config = load_runtime_config(tmp_path)
+
+    assert config.psfn_satellite_claim.namespace == "satellite.endpoint"
+    assert config.psfn_satellite_claim.type == "mobile-location"
+    assert config.psfn_satellite_claim.satellite_id == "phone-sat"
+    assert config.psfn_satellite_claim.endpoint_id == "phone-browser"
+    assert config.psfn_satellite_claim.endpoint_class == "mobile"
+    assert config.psfn_satellite_claim.location_mode == "mobile"
+    assert config.psfn_satellite_claim.telemetry.categories == ("location", "timezone", "battery")
+    assert config.psfn_client_certificate is not None
+    assert config.psfn_client_certificate.cert_path == tmp_path / "client.pem"
+    assert config.psfn_client_certificate.key_path == tmp_path / "client.key"
+    assert config.psfn_client_certificate.ca_path == tmp_path / "ca.pem"
 
 
 def test_load_runtime_config_requires_public_host_in_realtime_mode(tmp_path: Path, monkeypatch) -> None:

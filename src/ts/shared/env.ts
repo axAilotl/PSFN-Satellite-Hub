@@ -4,6 +4,24 @@ import path from "node:path";
 
 import dotenv from "dotenv";
 
+import {
+  CAPABILITY_PROFILE_DEFAULTS,
+  DEFAULT_ENDPOINT_DISPLAY_NAME,
+  DEFAULT_ENDPOINT_ID,
+  DEFAULT_PSFN_CHANNEL_TYPE,
+  DEFAULT_SATELLITE_ID,
+  DEFAULT_CAPABILITY_PROFILE,
+  SATELLITE_CLAIM_NAMESPACE,
+  normalizeSatelliteClaimConfig,
+  type PsfnClientCertificateConfig,
+  type PsfnSatelliteClaimConfig,
+  type SatelliteCapabilityProfile,
+  type SatelliteEndpointClass,
+  type SatelliteLocationMode,
+  type SatelliteTelemetryCategory,
+  type SatelliteTelemetryMode,
+} from "../hub/satellite-claim.js";
+
 export interface HermesRuntimeConfig {
   hermesHome: string;
   model: string;
@@ -18,6 +36,7 @@ export interface PsfnRuntimeConfig {
   baseUrl: string;
   apiKey?: string;
   channelType: string;
+  satelliteClaim: PsfnSatelliteClaimConfig;
 }
 
 export interface HubConfig {
@@ -102,16 +121,37 @@ export function loadProjectEnv(projectRoot: string): void {
   }
 }
 
-export function loadPsfnRuntime(_projectRoot: string): PsfnRuntimeConfig {
+export function loadPsfnRuntime(projectRoot: string): PsfnRuntimeConfig {
   const baseUrl = required("PSFN_API_BASE_URL");
   const model = process.env.PSFN_MODEL?.trim() || "psfn";
   const apiKey = process.env.PSFN_API_KEY?.trim() || undefined;
-  const channelType = process.env.PSFN_CHANNEL_TYPE?.trim() || "psfn-satellite-hub";
+  const capabilityProfile = parseCapabilityProfile(process.env.PSFN_CAPABILITY_PROFILE) ?? DEFAULT_CAPABILITY_PROFILE;
+  const profileDefaults = CAPABILITY_PROFILE_DEFAULTS[capabilityProfile];
+  const claimNamespace = process.env.PSFN_CLAIM_NAMESPACE?.trim() || SATELLITE_CLAIM_NAMESPACE;
+  const satelliteClaim = normalizeSatelliteClaimConfig({
+    namespace: claimNamespace,
+    type: process.env.PSFN_CLAIM_TYPE?.trim() || capabilityProfile,
+    channelType: process.env.PSFN_CHANNEL_TYPE?.trim() || claimNamespace || DEFAULT_PSFN_CHANNEL_TYPE,
+    satelliteId: process.env.PSFN_SATELLITE_ID?.trim() || DEFAULT_SATELLITE_ID,
+    endpointId: process.env.PSFN_ENDPOINT_ID?.trim() || process.env.PSFN_SATELLITE_ID?.trim() || DEFAULT_ENDPOINT_ID,
+    displayName: process.env.PSFN_ENDPOINT_NAME?.trim() || DEFAULT_ENDPOINT_DISPLAY_NAME,
+    endpointClass: parseEndpointClass(process.env.PSFN_ENDPOINT_CLASS) ?? profileDefaults.endpointClass,
+    locationMode: parseLocationMode(process.env.PSFN_LOCATION_MODE) ?? profileDefaults.locationMode,
+    capabilityProfile,
+    telemetry: {
+      mode: parseTelemetryMode(process.env.PSFN_TELEMETRY_MODE) ?? profileDefaults.telemetry.mode,
+      categories: process.env.PSFN_TELEMETRY_CATEGORIES
+        ? parseTelemetryCategories(process.env.PSFN_TELEMETRY_CATEGORIES)
+        : profileDefaults.telemetry.categories,
+    },
+    tls: loadPsfnClientCertificateConfig(projectRoot),
+  });
   return {
     model,
     baseUrl,
     apiKey,
-    channelType,
+    channelType: satelliteClaim.channelType,
+    satelliteClaim,
   };
 }
 
@@ -316,6 +356,39 @@ function resolvePath(projectRoot: string, value: string): string {
   return path.join(projectRoot, expanded);
 }
 
+function loadPsfnClientCertificateConfig(projectRoot: string): PsfnClientCertificateConfig | undefined {
+  const certPath = optional("PSFN_CLIENT_CERT_PATH");
+  const keyPath = optional("PSFN_CLIENT_KEY_PATH");
+  const caPath = optional("PSFN_CA_CERT_PATH");
+  if (!certPath && !keyPath && !caPath) {
+    return undefined;
+  }
+  if (Boolean(certPath) !== Boolean(keyPath)) {
+    throw new Error("PSFN_CLIENT_CERT_PATH and PSFN_CLIENT_KEY_PATH must both be set when either is configured");
+  }
+  const config: PsfnClientCertificateConfig = {
+    certPath: certPath ? resolveExistingFile(projectRoot, certPath, "PSFN_CLIENT_CERT_PATH") : undefined,
+    keyPath: keyPath ? resolveExistingFile(projectRoot, keyPath, "PSFN_CLIENT_KEY_PATH") : undefined,
+    caPath: caPath ? resolveExistingFile(projectRoot, caPath, "PSFN_CA_CERT_PATH") : undefined,
+  };
+  return config;
+}
+
+function resolveExistingFile(projectRoot: string, value: string, name: string): string {
+  const resolved = resolvePath(projectRoot, value);
+  let stats: fs.Stats;
+  try {
+    stats = fs.statSync(resolved);
+  } catch {
+    throw new Error(`${name} must point to a readable file`);
+  }
+  if (!stats.isFile()) {
+    throw new Error(`${name} must point to a readable file`);
+  }
+  fs.accessSync(resolved, fs.constants.R_OK);
+  return resolved;
+}
+
 function required(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) {
@@ -339,6 +412,59 @@ function splitCsv(value: string): string[] {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function parseCapabilityProfile(value: string | undefined): SatelliteCapabilityProfile | undefined {
+  return parseEnum(value, [
+    "voice-only",
+    "text-only",
+    "voxta-avatar",
+    "vision-capable",
+    "telemetry-only",
+    "mobile-location",
+  ], "PSFN_CAPABILITY_PROFILE");
+}
+
+function parseEndpointClass(value: string | undefined): SatelliteEndpointClass | undefined {
+  return parseEnum(value, ["voice", "text", "avatar", "vision", "telemetry", "mobile"], "PSFN_ENDPOINT_CLASS");
+}
+
+function parseLocationMode(value: string | undefined): SatelliteLocationMode | undefined {
+  return parseEnum(value, ["static", "mobile", "unavailable"], "PSFN_LOCATION_MODE");
+}
+
+function parseTelemetryMode(value: string | undefined): SatelliteTelemetryMode | undefined {
+  return parseEnum(value, ["disabled", "static", "periodic", "event"], "PSFN_TELEMETRY_MODE");
+}
+
+function parseTelemetryCategories(value: string): SatelliteTelemetryCategory[] {
+  return splitCsv(value).map((category) => {
+    const parsed = parseEnum(category, [
+      "location",
+      "timezone",
+      "room",
+      "presence",
+      "battery",
+      "health",
+      "device_status",
+      "avatar_state",
+    ], "PSFN_TELEMETRY_CATEGORIES");
+    if (!parsed) {
+      throw new Error("PSFN_TELEMETRY_CATEGORIES contains an empty category");
+    }
+    return parsed;
+  });
+}
+
+function parseEnum<T extends string>(value: string | undefined, allowed: readonly T[], name: string): T | undefined {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return undefined;
+  }
+  if ((allowed as readonly string[]).includes(normalized)) {
+    return normalized as T;
+  }
+  throw new Error(`${name} must be one of: ${allowed.join(", ")}`);
 }
 
 function isLoopbackHost(value: string): boolean {

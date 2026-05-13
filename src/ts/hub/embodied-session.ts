@@ -1,6 +1,6 @@
 import type { SatelliteCapabilities } from "../shared/protocol.js";
 
-export const DEFAULT_PSFN_CHANNEL_TYPE = "psfn-satellite-hub";
+export const DEFAULT_PSFN_CHANNEL_TYPE = "satellite.endpoint";
 
 export const DEFAULT_REALTIME_CAPABILITIES: Required<SatelliteCapabilities> = {
   input: ["microphone_pcm", "final_transcript", "text", "wake_event"],

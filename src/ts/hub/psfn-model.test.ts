@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type { PsfnChannelContext } from "./embodied-session.js";
 import { PsfnModelAdapter } from "./psfn-model.js";
+import { normalizeSatelliteClaimConfig } from "./satellite-claim.js";
 
 test("psfn model adapter sends embodied hub channel headers", async () => {
   const originalFetch = globalThis.fetch;
@@ -22,16 +23,23 @@ test("psfn model adapter sends embodied hub channel headers", async () => {
     );
   };
 
+  const satelliteClaim = normalizeSatelliteClaimConfig({
+    capabilityProfile: "text-only",
+    satelliteId: "hub-thin-shell",
+    endpointId: "thin-shell",
+    displayName: "Thin Shell Endpoint",
+  });
   const adapter = new PsfnModelAdapter({
     baseUrl: "http://psfn.test",
     model: "psfn",
     apiKey: "secret",
-    channelType: "psfn-satellite-hub",
+    channelType: satelliteClaim.channelType,
+    satelliteClaim,
   });
   const channel: PsfnChannelContext = {
     sessionId: "thin-shell:demo",
-    channelType: "psfn-satellite-hub",
-    channelId: "psfn-satellite-hub:thin-shell:demo",
+    channelType: "satellite.endpoint",
+    channelId: "satellite.endpoint:thin-shell:demo",
     sourceSatelliteId: "thin-shell",
     sourceSatelliteName: "Thin Shell",
     activeSatellites: [
@@ -62,17 +70,33 @@ test("psfn model adapter sends embodied hub channel headers", async () => {
 
     assert.deepEqual(chunks, ["Hello"]);
     assert.equal(capturedHeaders.Authorization, "Bearer secret");
-    assert.equal(capturedHeaders["X-PSFN-Channel-Type"], "psfn-satellite-hub");
-    assert.equal(capturedHeaders["X-PSFN-Channel-ID"], "psfn-satellite-hub:thin-shell:demo");
+    assert.equal(capturedHeaders["X-PSFN-Channel-Type"], "satellite.endpoint");
+    assert.equal(capturedHeaders["X-PSFN-Channel-ID"], "satellite.endpoint:thin-shell:demo");
     assert.equal(capturedHeaders["X-PSFN-Satellite-ID"], "thin-shell");
     assert.equal(capturedHeaders["X-PSFN-Satellite-Name"], "Thin Shell");
     assert.equal(capturedBody.user, "thin-shell:demo");
     assert.deepEqual(capturedBody.messages, [{ role: "user", content: "hello" }]);
+    const bodyClaim = capturedBody.satellite_claim as Record<string, unknown>;
+    assert.equal(bodyClaim.protocolVersion, "satellite-claim.v1");
+    assert.deepEqual(bodyClaim.claim, {
+      namespace: "satellite.endpoint",
+      type: "text-only",
+      satelliteId: "hub-thin-shell",
+      endpointId: "thin-shell",
+      sessionId: "thin-shell:demo",
+      threadId: "thin-shell:demo",
+      channelId: "satellite.endpoint:thin-shell:demo",
+      deviceClass: "text",
+      displayName: "Thin Shell Endpoint",
+      locationMode: "static",
+    });
+    assert.deepEqual(JSON.parse(capturedHeaders["X-PSFN-Satellite-Claim"] || "{}"), bodyClaim);
     assert.deepEqual(JSON.parse(capturedHeaders["X-PSFN-Channel-Metadata"] || "{}"), {
       sessionId: "thin-shell:demo",
       sourceSatelliteId: "thin-shell",
       sourceSatelliteName: "Thin Shell",
       activeSatellites: channel.activeSatellites,
+      satelliteClaim: bodyClaim,
     });
   } finally {
     globalThis.fetch = originalFetch;

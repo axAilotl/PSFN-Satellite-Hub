@@ -183,7 +183,7 @@ test("live transport sends hello and typed commands over websocket", async () =>
     switch (message.type) {
       case "hello": {
         const sessionId = message.sessionId ?? `realtime:${message.deviceId}`;
-        const channelId = message.channelId ?? `psfn-satellite-hub:${sessionId}`;
+        const channelId = message.channelId ?? `satellite.endpoint:${sessionId}`;
         const satelliteId = message.satelliteId ?? message.deviceId;
         const satelliteName = message.satelliteName ?? message.deviceName;
         socket.send(JSON.stringify({

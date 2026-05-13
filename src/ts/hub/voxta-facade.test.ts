@@ -7,6 +7,7 @@ import WebSocket, { type RawData } from "ws";
 import type { HubConfig } from "../shared/env.js";
 import type { AgentRuntimeAdapter } from "./agent-runtime.js";
 import type { PsfnChannelContext } from "./embodied-session.js";
+import { normalizeSatelliteClaimConfig } from "./satellite-claim.js";
 import { RealtimeHubServer } from "./server.js";
 import type { ConversationMessage } from "./session-store.js";
 
@@ -126,6 +127,12 @@ test("Voxta facade negotiates SignalR and routes SendMessage into the embodied s
 });
 
 function testHubConfig(): HubConfig {
+  const satelliteClaim = normalizeSatelliteClaimConfig({
+    capabilityProfile: "voxta-avatar",
+    satelliteId: "voxta-vam",
+    endpointId: "voxta-vam",
+    displayName: "Voxta VaM",
+  });
   return {
     agentRuntime: "psfn",
     bindHost: "127.0.0.1",
@@ -139,7 +146,8 @@ function testHubConfig(): HubConfig {
       baseUrl: "http://127.0.0.1:1/v1",
       apiKey: "test",
       model: "psfn",
-      channelType: "psfn-satellite-hub",
+      channelType: satelliteClaim.channelType,
+      satelliteClaim,
     },
     hermes: null,
     voxta: {

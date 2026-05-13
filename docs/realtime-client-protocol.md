@@ -49,7 +49,8 @@ All client messages are JSON text frames.
 
 `channelId` is optional. If omitted, the hub derives a stable PSFN channel id
 as `<PSFN_CHANNEL_TYPE>:<sessionId>`, defaulting to
-`psfn-satellite-hub:<sessionId>`.
+`satellite.endpoint:<sessionId>`. Endpoint identity and current capabilities are
+advertised to PSFN separately through the satellite claim envelope.
 
 `user.text`
 

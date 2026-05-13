@@ -1114,7 +1114,7 @@ function createMockSessionReady(hello: HelloMessage): SessionReadyMessage {
   return {
     type: "session.ready",
     sessionId,
-    channelId: hello.channelId ?? `psfn-satellite-hub:${sessionId}`,
+    channelId: hello.channelId ?? `satellite.endpoint:${sessionId}`,
     deviceId: hello.deviceId,
     deviceName: hello.deviceName,
     satelliteId: hello.satelliteId ?? hello.deviceId,

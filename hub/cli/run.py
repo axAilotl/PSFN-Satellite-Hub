@@ -36,6 +36,8 @@ async def _run_esphome_runtime(
         model_name=config.psfn_model,
         author_id=config.psfn_author_id,
         author_name=config.psfn_author_name,
+        claim_config=config.psfn_satellite_claim,
+        client_certificate=config.psfn_client_certificate,
     )
 
     try:
@@ -101,6 +103,8 @@ async def _run_realtime_runtime(
         psfn_model=config.psfn_model,
         psfn_author_id=config.psfn_author_id,
         psfn_author_name=config.psfn_author_name,
+        psfn_satellite_claim=config.psfn_satellite_claim,
+        psfn_client_certificate=config.psfn_client_certificate,
     ):
         while True:
             await asyncio.sleep(3600)

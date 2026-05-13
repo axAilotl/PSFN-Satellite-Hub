@@ -41,7 +41,7 @@ test("transport logs preserve source, direction, message type, and payload", () 
     state: "ready",
     profileId: "fixture.motion-display",
     sessionId: "device-studio:fixture-motion-display",
-    channelId: "psfn-satellite-hub:device-studio:fixture-motion-display",
+    channelId: "satellite.endpoint:device-studio:fixture-motion-display",
     messageType: "message",
     payload: {
       type: "message",

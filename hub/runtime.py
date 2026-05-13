@@ -4,10 +4,31 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import socket
+from typing import TypeVar
 
 from dotenv import load_dotenv
 
 from hub.config import ESPHomeTarget, RealtimeTarget
+from hub.satellite_claims import (
+    CAPABILITY_PROFILE_DEFAULTS,
+    DEFAULT_CAPABILITY_PROFILE,
+    DEFAULT_ENDPOINT_DISPLAY_NAME,
+    DEFAULT_ENDPOINT_ID,
+    DEFAULT_SATELLITE_ID,
+    SATELLITE_CLAIM_NAMESPACE,
+    ClientCertificateConfig,
+    CapabilityProfile,
+    EndpointClass,
+    LocationMode,
+    SatelliteClaimConfig,
+    TelemetryConfig,
+    TelemetryCategory,
+    TelemetryMode,
+    normalize_claim_config,
+)
+
+
+TEnum = TypeVar("TEnum", bound=str)
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -57,6 +78,8 @@ class HubRuntimeConfig:
     psfn_model: str
     psfn_author_id: str | None
     psfn_author_name: str | None
+    psfn_satellite_claim: SatelliteClaimConfig
+    psfn_client_certificate: ClientCertificateConfig | None
     audio_bind_host: str
     audio_public_host: str
     audio_port: int
@@ -130,6 +153,8 @@ def load_runtime_config(project_root: Path) -> HubRuntimeConfig:
     psfn_author_name = os.getenv("PSFN_AUTHOR_NAME") or None
     if bool(psfn_author_id) != bool(psfn_author_name):
         raise ValueError("PSFN_AUTHOR_ID and PSFN_AUTHOR_NAME must both be set when either is configured")
+    psfn_client_certificate = _load_psfn_client_certificate(project_root)
+    psfn_satellite_claim = _load_psfn_satellite_claim(psfn_client_certificate)
     artifacts_root = _resolve_path(project_root, os.getenv("ARTIFACT_ROOT", ".artifacts/runtime"))
 
     return HubRuntimeConfig(
@@ -150,6 +175,8 @@ def load_runtime_config(project_root: Path) -> HubRuntimeConfig:
         psfn_model=psfn_model,
         psfn_author_id=psfn_author_id,
         psfn_author_name=psfn_author_name,
+        psfn_satellite_claim=psfn_satellite_claim,
+        psfn_client_certificate=psfn_client_certificate,
         audio_bind_host=audio_bind_host,
         audio_public_host=audio_public_host,
         audio_port=audio_port,
@@ -165,3 +192,97 @@ def load_runtime_config(project_root: Path) -> HubRuntimeConfig:
         voice_speech_rms_threshold=float(os.getenv("VOICE_SPEECH_RMS_THRESHOLD", "25")),
         voice_min_speech_chunks_for_endpointing=int(os.getenv("VOICE_MIN_SPEECH_CHUNKS_FOR_ENDPOINTING", "4")),
     )
+
+
+def _load_psfn_satellite_claim(tls: ClientCertificateConfig | None) -> SatelliteClaimConfig:
+    capability_profile = _parse_capability_profile(os.getenv("PSFN_CAPABILITY_PROFILE")) or DEFAULT_CAPABILITY_PROFILE
+    defaults = CAPABILITY_PROFILE_DEFAULTS[capability_profile]
+    telemetry_mode = _parse_telemetry_mode(os.getenv("PSFN_TELEMETRY_MODE")) or defaults.telemetry.mode
+    telemetry_categories = (
+        tuple(_parse_telemetry_category(value) for value in _split_csv(os.getenv("PSFN_TELEMETRY_CATEGORIES")))
+        if os.getenv("PSFN_TELEMETRY_CATEGORIES")
+        else defaults.telemetry.categories
+    )
+    return normalize_claim_config(
+        namespace=os.getenv("PSFN_CLAIM_NAMESPACE") or SATELLITE_CLAIM_NAMESPACE,
+        claim_type=os.getenv("PSFN_CLAIM_TYPE") or capability_profile,
+        channel_type=os.getenv("PSFN_CHANNEL_TYPE") or os.getenv("PSFN_CLAIM_NAMESPACE") or SATELLITE_CLAIM_NAMESPACE,
+        satellite_id=os.getenv("PSFN_SATELLITE_ID") or DEFAULT_SATELLITE_ID,
+        endpoint_id=os.getenv("PSFN_ENDPOINT_ID") or os.getenv("PSFN_SATELLITE_ID") or DEFAULT_ENDPOINT_ID,
+        display_name=os.getenv("PSFN_ENDPOINT_NAME") or DEFAULT_ENDPOINT_DISPLAY_NAME,
+        endpoint_class=_parse_endpoint_class(os.getenv("PSFN_ENDPOINT_CLASS")) or defaults.endpoint_class,
+        location_mode=_parse_location_mode(os.getenv("PSFN_LOCATION_MODE")) or defaults.location_mode,
+        capability_profile=capability_profile,
+        telemetry=TelemetryConfig(mode=telemetry_mode, categories=telemetry_categories),
+        tls=tls,
+    )
+
+
+def _load_psfn_client_certificate(project_root: Path) -> ClientCertificateConfig | None:
+    cert_path = os.getenv("PSFN_CLIENT_CERT_PATH") or None
+    key_path = os.getenv("PSFN_CLIENT_KEY_PATH") or None
+    ca_path = os.getenv("PSFN_CA_CERT_PATH") or None
+    if not cert_path and not key_path and not ca_path:
+        return None
+    if bool(cert_path) != bool(key_path):
+        raise ValueError("PSFN_CLIENT_CERT_PATH and PSFN_CLIENT_KEY_PATH must both be set when either is configured")
+    return ClientCertificateConfig(
+        cert_path=_resolve_existing_file(project_root, cert_path, "PSFN_CLIENT_CERT_PATH") if cert_path else None,
+        key_path=_resolve_existing_file(project_root, key_path, "PSFN_CLIENT_KEY_PATH") if key_path else None,
+        ca_path=_resolve_existing_file(project_root, ca_path, "PSFN_CA_CERT_PATH") if ca_path else None,
+    )
+
+
+def _resolve_existing_file(project_root: Path, value: str, name: str) -> Path:
+    path = _resolve_path(project_root, value)
+    if not path.is_file():
+        raise ValueError(f"{name} must point to a readable file")
+    try:
+        with path.open("rb"):
+            pass
+    except OSError as exc:
+        raise ValueError(f"{name} must point to a readable file") from exc
+    return path
+
+
+def _split_csv(value: str | None) -> list[str]:
+    return [item.strip() for item in (value or "").split(",") if item.strip()]
+
+
+def _parse_capability_profile(value: str | None) -> CapabilityProfile | None:
+    return _parse_enum(
+        value,
+        ["voice-only", "text-only", "voxta-avatar", "vision-capable", "telemetry-only", "mobile-location"],
+        "PSFN_CAPABILITY_PROFILE",
+    )
+
+
+def _parse_endpoint_class(value: str | None) -> EndpointClass | None:
+    return _parse_enum(value, ["voice", "text", "avatar", "vision", "telemetry", "mobile"], "PSFN_ENDPOINT_CLASS")
+
+
+def _parse_location_mode(value: str | None) -> LocationMode | None:
+    return _parse_enum(value, ["static", "mobile", "unavailable"], "PSFN_LOCATION_MODE")
+
+
+def _parse_telemetry_mode(value: str | None) -> TelemetryMode | None:
+    return _parse_enum(value, ["disabled", "static", "periodic", "event"], "PSFN_TELEMETRY_MODE")
+
+
+def _parse_telemetry_category(value: str) -> TelemetryCategory:
+    parsed = _parse_enum(
+        value,
+        ["location", "timezone", "room", "presence", "battery", "health", "device_status", "avatar_state"],
+        "PSFN_TELEMETRY_CATEGORIES",
+    )
+    assert parsed is not None
+    return parsed
+
+
+def _parse_enum(value: str | None, allowed: list[TEnum], name: str) -> TEnum | None:
+    normalized = (value or "").strip()
+    if not normalized:
+        return None
+    if normalized in allowed:
+        return normalized  # type: ignore[return-value]
+    raise ValueError(f"{name} must be one of: {', '.join(allowed)}")
