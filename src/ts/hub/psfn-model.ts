@@ -54,7 +54,7 @@ export class PsfnModelAdapter implements AgentRuntimeAdapter {
       this.buildHeaders(channel, satelliteClaim),
       JSON.stringify({
         model: this.runtime.model,
-        stream: true,
+        stream: false,
         max_tokens: 80,
         system_prompt_mode: "custom",
         system_prompt: DEFAULT_SYSTEM_PROMPT,
@@ -69,33 +69,11 @@ export class PsfnModelAdapter implements AgentRuntimeAdapter {
       throw new Error(await formatError(response));
     }
 
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let fullText = "";
-
-    for await (const value of response.chunks()) {
-      buffer += decoder.decode(value, { stream: true });
-      while (true) {
-        const boundary = buffer.indexOf("\n\n");
-        if (boundary < 0) break;
-        const rawEvent = buffer.slice(0, boundary);
-        buffer = buffer.slice(boundary + 2);
-        const lines = rawEvent
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(Boolean);
-        for (const line of lines) {
-          if (!line.startsWith("data:")) continue;
-          const payload = line.slice(5).trim();
-          if (!payload || payload === "[DONE]") continue;
-          const delta = extractDelta(payload);
-          if (!delta) continue;
-          fullText += delta;
-          yield delta;
-        }
-      }
+    const fullText = extractCompletionText(await response.text()).trim();
+    if (!fullText) {
+      throw new Error("PSFN chat completion response did not include assistant content");
     }
-
+    yield fullText;
     return fullText.trim();
   }
 
@@ -236,7 +214,7 @@ function deriveChannelId(channelType: string, conversationId: string): string {
   return `${channelType}:${normalized}`;
 }
 
-function extractDelta(payload: string): string {
+function extractCompletionText(payload: string): string {
   const parsed = JSON.parse(payload) as {
     choices?: Array<{
       delta?: { content?: string; role?: string };

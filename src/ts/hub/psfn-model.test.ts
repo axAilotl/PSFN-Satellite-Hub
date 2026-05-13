@@ -14,11 +14,10 @@ test("psfn model adapter sends embodied hub channel headers", async () => {
     capturedHeaders = init?.headers as Record<string, string>;
     capturedBody = JSON.parse(String(init?.body || "{}")) as Record<string, unknown>;
     return new Response(
-      'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n'
-        + "data: [DONE]\n\n",
+      '{"choices":[{"message":{"role":"assistant","content":"Hello"}}]}',
       {
         status: 200,
-        headers: { "Content-Type": "text/event-stream" },
+        headers: { "Content-Type": "application/json" },
       },
     );
   };
@@ -80,6 +79,7 @@ test("psfn model adapter sends embodied hub channel headers", async () => {
     assert.equal(capturedHeaders["X-PSFN-Satellite-Capabilities"], "text");
     assert.equal(capturedHeaders["X-PSFN-Satellite-Name"], "Thin Shell");
     assert.equal(capturedBody.user, "thin-shell:demo");
+    assert.equal(capturedBody.stream, false);
     assert.deepEqual(capturedBody.messages, [{ role: "user", content: "hello" }]);
     const bodyClaim = capturedBody.satellite_claim as Record<string, unknown>;
     assert.equal(bodyClaim.protocolVersion, "satellite-claim.v1");
