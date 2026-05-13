@@ -208,6 +208,9 @@ server-side sprite generation through `FAL_KEY`, manual sprite packing, and
 hardware verification labels. See [docs/device-studio.md](docs/device-studio.md)
 for the operator workflow and verification checklist.
 
+To build a new hub-facing endpoint, see
+[docs/building-satellites.md](docs/building-satellites.md).
+
 Send a typed turn through the PSFN channel seam with the text-only thin shell:
 
 ```bash
